@@ -15,6 +15,8 @@ export type Database = {
           title: string;
           room_code: string;
           admin_key: string;
+          admin_password_hash: string | null;
+          admin_password_updated_at: string | null;
           status: "waiting" | "playing" | "finished";
           created_at: string;
           updated_at: string;
@@ -24,6 +26,8 @@ export type Database = {
           title: string;
           room_code: string;
           admin_key: string;
+          admin_password_hash?: string | null;
+          admin_password_updated_at?: string | null;
           status?: "waiting" | "playing" | "finished";
           created_at?: string;
           updated_at?: string;
@@ -65,6 +69,9 @@ export type Database = {
           option_4: string;
           correct_index: number;
           time_limit_sec: number;
+          difficulty: "easy" | "normal" | "hard" | "special" | "final";
+          base_points: number;
+          speed_bonus_enabled: boolean;
           created_at: string;
         };
         Insert: {
@@ -78,6 +85,9 @@ export type Database = {
           option_4: string;
           correct_index: number;
           time_limit_sec?: number;
+          difficulty?: "easy" | "normal" | "hard" | "special" | "final";
+          base_points?: number;
+          speed_bonus_enabled?: boolean;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["questions"]["Insert"]>;
@@ -92,6 +102,8 @@ export type Database = {
           selected_index: number;
           response_ms: number;
           is_correct: boolean;
+          base_points: number;
+          speed_bonus: number;
           point: number;
           answered_at: string;
         };
@@ -103,6 +115,8 @@ export type Database = {
           selected_index: number;
           response_ms: number;
           is_correct: boolean;
+          base_points?: number;
+          speed_bonus?: number;
           point: number;
           answered_at?: string;
         };
@@ -223,6 +237,30 @@ export type Database = {
         Args: { p_room_code: string; p_admin_key: string };
         Returns: Json;
       };
+      admin_set_password: {
+        Args: { p_room_code: string; p_admin_key: string; p_password: string };
+        Returns: Json;
+      };
+      admin_verify_password: {
+        Args: { p_room_code: string; p_password: string };
+        Returns: Json;
+      };
+      admin_change_password: {
+        Args: { p_room_code: string; p_current_password: string; p_new_password: string };
+        Returns: Json;
+      };
+      admin_update_event: {
+        Args: { p_room_code: string; p_admin_key: string; p_title: string };
+        Returns: Json;
+      };
+      admin_reopen_event: {
+        Args: { p_room_code: string; p_admin_key: string };
+        Returns: Json;
+      };
+      admin_reset_run: {
+        Args: { p_room_code: string; p_admin_key: string };
+        Returns: Json;
+      };
       admin_upsert_question: {
         Args: {
           p_room_code: string;
@@ -236,6 +274,9 @@ export type Database = {
           p_option_4: string;
           p_correct_index: number;
           p_time_limit_sec: number;
+          p_difficulty: "easy" | "normal" | "hard" | "special" | "final";
+          p_base_points: number;
+          p_speed_bonus_enabled: boolean;
         };
         Returns: Json;
       };

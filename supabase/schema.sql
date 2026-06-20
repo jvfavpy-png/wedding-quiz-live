@@ -1,10 +1,13 @@
-create extension if not exists pgcrypto;
+create schema if not exists extensions;
+create extension if not exists pgcrypto with schema extensions;
 
 create table if not exists public.events (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   room_code text unique not null,
   admin_key text not null,
+  admin_password_hash text null,
+  admin_password_updated_at timestamptz null,
   status text not null default 'waiting',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -38,11 +41,16 @@ create table if not exists public.questions (
   option_4 text not null,
   correct_index integer not null,
   time_limit_sec integer not null default 10,
+  difficulty text not null default 'normal',
+  base_points integer not null default 100,
+  speed_bonus_enabled boolean not null default true,
   created_at timestamptz not null default now(),
   constraint questions_event_order_unique unique (event_id, order_no) deferrable initially immediate,
   constraint questions_order_positive check (order_no > 0),
   constraint questions_correct_index_check check (correct_index in (0, 1, 2, 3)),
   constraint questions_time_limit_check check (time_limit_sec between 5 and 60),
+  constraint questions_difficulty_check check (difficulty in ('easy', 'normal', 'hard', 'special', 'final')),
+  constraint questions_base_points_check check (base_points between 10 and 1000),
   constraint questions_text_not_blank check (char_length(btrim(text)) > 0),
   constraint questions_options_not_blank check (
     char_length(btrim(option_1)) > 0 and
@@ -60,11 +68,15 @@ create table if not exists public.answers (
   selected_index integer not null,
   response_ms integer not null,
   is_correct boolean not null,
+  base_points integer not null default 0,
+  speed_bonus integer not null default 0,
   point integer not null,
   answered_at timestamptz not null default now(),
   constraint answers_question_participant_unique unique (question_id, participant_id),
   constraint answers_selected_index_check check (selected_index in (0, 1, 2, 3)),
   constraint answers_response_ms_non_negative check (response_ms >= 0),
+  constraint answers_base_points_non_negative check (base_points >= 0),
+  constraint answers_speed_bonus_non_negative check (speed_bonus >= 0),
   constraint answers_point_non_negative check (point >= 0)
 );
 
@@ -98,6 +110,51 @@ create table if not exists public.question_stats (
     option_0_count >= 0 and option_1_count >= 0 and option_2_count >= 0 and option_3_count >= 0 and total_count >= 0
   )
 );
+
+alter table public.questions
+  add column if not exists difficulty text not null default 'normal',
+  add column if not exists base_points integer not null default 100,
+  add column if not exists speed_bonus_enabled boolean not null default true;
+
+alter table public.events
+  add column if not exists admin_password_hash text null,
+  add column if not exists admin_password_updated_at timestamptz null;
+
+alter table public.answers
+  add column if not exists base_points integer not null default 0,
+  add column if not exists speed_bonus integer not null default 0;
+
+do $$
+begin
+  alter table public.questions
+    add constraint questions_difficulty_check check (difficulty in ('easy', 'normal', 'hard', 'special', 'final'));
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.questions
+    add constraint questions_base_points_check check (base_points between 10 and 1000);
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.answers
+    add constraint answers_base_points_non_negative check (base_points >= 0);
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.answers
+    add constraint answers_speed_bonus_non_negative check (speed_bonus >= 0);
+exception
+  when duplicate_object then null;
+end $$;
 
 create index if not exists participants_event_score_idx on public.participants(event_id, score desc, joined_at asc);
 create index if not exists questions_event_order_idx on public.questions(event_id, order_no asc);
@@ -256,7 +313,7 @@ begin
     and admin_key = p_admin_key;
 
   if v_event_id is null then
-    raise exception '管理キーが正しくありません' using errcode = 'P0001';
+    raise exception '管理者用パスワードの認証が必要です' using errcode = 'P0001';
   end if;
 
   return v_event_id;
@@ -275,6 +332,141 @@ as $$
     when p_response_ms <= 8000 then 20
     else 10
   end;
+$$;
+
+create or replace function public.validate_admin_password(p_password text)
+returns void
+language plpgsql
+immutable
+as $$
+begin
+  if char_length(btrim(coalesce(p_password, ''))) = 0 then
+    raise exception '管理者用パスワードを入力してください' using errcode = 'P0001';
+  end if;
+
+  if char_length(coalesce(p_password, '')) < 6 then
+    raise exception '管理者用パスワードは6文字以上で入力してください。' using errcode = 'P0001';
+  end if;
+end;
+$$;
+
+create or replace function public.admin_set_password(
+  p_room_code text,
+  p_admin_key text,
+  p_password text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_event_id uuid;
+  v_event public.events%rowtype;
+begin
+  perform public.validate_admin_password(p_password);
+  v_event_id = public.require_admin_event(p_room_code, p_admin_key);
+
+  update public.events
+  set admin_password_hash = extensions.crypt(p_password, extensions.gen_salt('bf')),
+      admin_password_updated_at = now()
+  where id = v_event_id
+  returning * into v_event;
+
+  return jsonb_build_object(
+    'ok', true,
+    'eventId', v_event.id,
+    'roomCode', v_event.room_code,
+    'passwordUpdatedAt', v_event.admin_password_updated_at
+  );
+end;
+$$;
+
+create or replace function public.admin_verify_password(
+  p_room_code text,
+  p_password text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_event public.events%rowtype;
+begin
+  perform public.validate_admin_password(p_password);
+
+  select * into v_event
+  from public.events
+  where room_code = upper(btrim(p_room_code));
+
+  if not found then
+    raise exception 'イベントが見つかりません' using errcode = 'P0001';
+  end if;
+
+  if v_event.admin_password_hash is not null then
+    if extensions.crypt(p_password, v_event.admin_password_hash) <> v_event.admin_password_hash then
+      raise exception '管理者用パスワードが正しくありません' using errcode = 'P0001';
+    end if;
+  elsif p_password <> v_event.admin_key then
+    raise exception '管理者用パスワードが正しくありません' using errcode = 'P0001';
+  end if;
+
+  return jsonb_build_object(
+    'ok', true,
+    'eventId', v_event.id,
+    'roomCode', v_event.room_code,
+    'passwordUpdatedAt', v_event.admin_password_updated_at
+  );
+end;
+$$;
+
+create or replace function public.admin_change_password(
+  p_room_code text,
+  p_current_password text,
+  p_new_password text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_event public.events%rowtype;
+begin
+  perform public.validate_admin_password(p_current_password);
+  perform public.validate_admin_password(p_new_password);
+
+  select * into v_event
+  from public.events
+  where room_code = upper(btrim(p_room_code))
+  for update;
+
+  if not found then
+    raise exception 'イベントが見つかりません' using errcode = 'P0001';
+  end if;
+
+  if v_event.admin_password_hash is not null then
+    if extensions.crypt(p_current_password, v_event.admin_password_hash) <> v_event.admin_password_hash then
+      raise exception '現在の管理者用パスワードが正しくありません' using errcode = 'P0001';
+    end if;
+  elsif p_current_password <> v_event.admin_key then
+    raise exception '現在の管理者用パスワードが正しくありません' using errcode = 'P0001';
+  end if;
+
+  update public.events
+  set admin_password_hash = extensions.crypt(p_new_password, extensions.gen_salt('bf')),
+      admin_password_updated_at = now()
+  where id = v_event.id
+  returning * into v_event;
+
+  return jsonb_build_object(
+    'ok', true,
+    'eventId', v_event.id,
+    'roomCode', v_event.room_code,
+    'passwordUpdatedAt', v_event.admin_password_updated_at
+  );
+end;
 $$;
 
 create or replace function public.join_event(
@@ -361,6 +553,8 @@ declare
   v_now timestamptz = now();
   v_response_ms integer;
   v_is_correct boolean;
+  v_awarded_base_points integer = 0;
+  v_speed_bonus integer = 0;
   v_point integer;
   v_answer_id uuid;
 begin
@@ -429,7 +623,11 @@ begin
 
   v_response_ms = greatest(0, floor(extract(epoch from (v_now - v_state.question_started_at)) * 1000)::integer);
   v_is_correct = v_question.correct_index = p_selected_index;
-  v_point = case when v_is_correct then 100 + public.speed_bonus(v_response_ms) else 0 end;
+  if v_is_correct then
+    v_awarded_base_points = v_question.base_points;
+    v_speed_bonus = case when v_question.speed_bonus_enabled then public.speed_bonus(v_response_ms) else 0 end;
+  end if;
+  v_point = v_awarded_base_points + v_speed_bonus;
 
   begin
     insert into public.answers(
@@ -439,6 +637,8 @@ begin
       selected_index,
       response_ms,
       is_correct,
+      base_points,
+      speed_bonus,
       point
     )
     values (
@@ -448,6 +648,8 @@ begin
       p_selected_index,
       v_response_ms,
       v_is_correct,
+      v_awarded_base_points,
+      v_speed_bonus,
       v_point
     )
     returning id into v_answer_id;
@@ -621,6 +823,116 @@ begin
 end;
 $$;
 
+create or replace function public.admin_update_event(
+  p_room_code text,
+  p_admin_key text,
+  p_title text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_event_id uuid;
+  v_event public.events%rowtype;
+  v_title text;
+begin
+  v_event_id = public.require_admin_event(p_room_code, p_admin_key);
+  v_title = left(btrim(coalesce(p_title, '')), 80);
+
+  if char_length(v_title) = 0 then
+    raise exception 'イベント名を入力してください' using errcode = 'P0001';
+  end if;
+
+  update public.events
+  set title = v_title
+  where id = v_event_id
+  returning * into v_event;
+
+  return jsonb_build_object(
+    'event', jsonb_build_object(
+      'id', v_event.id,
+      'title', v_event.title,
+      'roomCode', v_event.room_code,
+      'status', v_event.status
+    )
+  );
+end;
+$$;
+
+create or replace function public.admin_reopen_event(p_room_code text, p_admin_key text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_event_id uuid;
+begin
+  v_event_id = public.require_admin_event(p_room_code, p_admin_key);
+
+  update public.live_state
+  set phase = 'lobby',
+      current_question_id = null,
+      question_started_at = null
+  where event_id = v_event_id;
+
+  update public.events
+  set status = 'waiting'
+  where id = v_event_id;
+
+  return jsonb_build_object('ok', true, 'phase', 'lobby', 'status', 'waiting');
+end;
+$$;
+
+create or replace function public.admin_reset_run(p_room_code text, p_admin_key text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_event_id uuid;
+begin
+  v_event_id = public.require_admin_event(p_room_code, p_admin_key);
+
+  delete from public.answers
+  where event_id = v_event_id;
+
+  update public.participants
+  set score = 0,
+      last_seen_at = now()
+  where event_id = v_event_id;
+
+  update public.question_stats
+  set option_0_count = 0,
+      option_1_count = 0,
+      option_2_count = 0,
+      option_3_count = 0,
+      total_count = 0
+  where event_id = v_event_id;
+
+  update public.event_stats
+  set total_answer_count = 0
+  where event_id = v_event_id;
+
+  update public.live_state
+  set phase = 'lobby',
+      current_question_id = null,
+      question_started_at = null
+  where event_id = v_event_id;
+
+  update public.events
+  set status = 'waiting'
+  where id = v_event_id;
+
+  return jsonb_build_object('ok', true, 'phase', 'lobby', 'status', 'waiting');
+end;
+$$;
+
+drop function if exists public.admin_upsert_question(text, text, uuid, integer, text, text, text, text, text, integer, integer);
+
 create or replace function public.admin_upsert_question(
   p_room_code text,
   p_admin_key text,
@@ -632,7 +944,10 @@ create or replace function public.admin_upsert_question(
   p_option_3 text,
   p_option_4 text,
   p_correct_index integer,
-  p_time_limit_sec integer
+  p_time_limit_sec integer,
+  p_difficulty text default 'normal',
+  p_base_points integer default 100,
+  p_speed_bonus_enabled boolean default true
 )
 returns jsonb
 language plpgsql
@@ -644,6 +959,8 @@ declare
   v_question public.questions%rowtype;
   v_order_no integer;
   v_trimmed_text text;
+  v_difficulty text;
+  v_base_points integer;
 begin
   v_event_id = public.require_admin_event(p_room_code, p_admin_key);
 
@@ -653,6 +970,16 @@ begin
 
   if p_time_limit_sec < 5 or p_time_limit_sec > 60 then
     raise exception '制限時間は5〜60秒で設定してください' using errcode = 'P0001';
+  end if;
+
+  v_difficulty = coalesce(nullif(btrim(p_difficulty), ''), 'normal');
+  if v_difficulty not in ('easy', 'normal', 'hard', 'special', 'final') then
+    raise exception '難易度が不正です' using errcode = 'P0001';
+  end if;
+
+  v_base_points = coalesce(p_base_points, 100);
+  if v_base_points < 10 or v_base_points > 1000 then
+    raise exception '基本得点は10〜1000点で設定してください' using errcode = 'P0001';
   end if;
 
   v_trimmed_text = btrim(coalesce(p_text, ''));
@@ -681,7 +1008,10 @@ begin
       option_3,
       option_4,
       correct_index,
-      time_limit_sec
+      time_limit_sec,
+      difficulty,
+      base_points,
+      speed_bonus_enabled
     )
     values (
       v_event_id,
@@ -692,7 +1022,10 @@ begin
       btrim(coalesce(p_option_3, '')),
       btrim(coalesce(p_option_4, '')),
       p_correct_index,
-      p_time_limit_sec
+      p_time_limit_sec,
+      v_difficulty,
+      v_base_points,
+      coalesce(p_speed_bonus_enabled, true)
     )
     returning * into v_question;
   else
@@ -717,7 +1050,10 @@ begin
         option_3 = btrim(coalesce(p_option_3, '')),
         option_4 = btrim(coalesce(p_option_4, '')),
         correct_index = p_correct_index,
-        time_limit_sec = p_time_limit_sec
+        time_limit_sec = p_time_limit_sec,
+        difficulty = v_difficulty,
+        base_points = v_base_points,
+        speed_bonus_enabled = coalesce(p_speed_bonus_enabled, true)
     where id = p_question_id and event_id = v_event_id
     returning * into v_question;
 
@@ -732,7 +1068,10 @@ begin
     'text', v_question.text,
     'options', jsonb_build_array(v_question.option_1, v_question.option_2, v_question.option_3, v_question.option_4),
     'correctIndex', v_question.correct_index,
-    'timeLimitSec', v_question.time_limit_sec
+    'timeLimitSec', v_question.time_limit_sec,
+    'difficulty', v_question.difficulty,
+    'basePoints', v_question.base_points,
+    'speedBonusEnabled', v_question.speed_bonus_enabled
   );
 end;
 $$;
@@ -861,7 +1200,10 @@ begin
         'text', v_question.text,
         'options', jsonb_build_array(v_question.option_1, v_question.option_2, v_question.option_3, v_question.option_4),
         'correctIndex', case when v_reveal then to_jsonb(v_question.correct_index) else 'null'::jsonb end,
-        'timeLimitSec', v_question.time_limit_sec
+        'timeLimitSec', v_question.time_limit_sec,
+        'difficulty', v_question.difficulty,
+        'basePoints', v_question.base_points,
+        'speedBonusEnabled', v_question.speed_bonus_enabled
       );
     end if;
   end if;
@@ -1045,7 +1387,10 @@ begin
     'selectedIndex', v_answer.selected_index,
     'responseMs', v_answer.response_ms,
     'isCorrect', case when v_reveal then to_jsonb(v_answer.is_correct) else 'null'::jsonb end,
-    'point', case when v_reveal then to_jsonb(v_answer.point) else 'null'::jsonb end
+    'basePoints', case when v_reveal then to_jsonb(v_answer.base_points) else 'null'::jsonb end,
+    'speedBonus', case when v_reveal then to_jsonb(v_answer.speed_bonus) else 'null'::jsonb end,
+    'point', case when v_reveal then to_jsonb(v_answer.point) else 'null'::jsonb end,
+    'totalScore', case when v_reveal then to_jsonb(v_participant.score) else 'null'::jsonb end
   );
 end;
 $$;
@@ -1065,6 +1410,7 @@ declare
   v_stats public.event_stats%rowtype;
   v_questions jsonb;
   v_ranking jsonb;
+  v_scored_participant_count integer;
 begin
   perform public.require_admin_event(p_room_code, p_admin_key);
 
@@ -1074,6 +1420,9 @@ begin
 
   select * into v_state from public.live_state where event_id = v_event.id;
   select * into v_stats from public.event_stats where event_id = v_event.id;
+  select count(*)::integer into v_scored_participant_count
+  from public.participants
+  where event_id = v_event.id and score > 0;
 
   select coalesce(jsonb_agg(
     jsonb_build_object(
@@ -1082,7 +1431,10 @@ begin
       'text', q.text,
       'options', jsonb_build_array(q.option_1, q.option_2, q.option_3, q.option_4),
       'correctIndex', q.correct_index,
-      'timeLimitSec', q.time_limit_sec
+      'timeLimitSec', q.time_limit_sec,
+      'difficulty', q.difficulty,
+      'basePoints', q.base_points,
+      'speedBonusEnabled', q.speed_bonus_enabled
     )
     order by q.order_no
   ), '[]'::jsonb)
@@ -1121,6 +1473,8 @@ begin
     'questions', v_questions,
     'participantCount', coalesce(v_stats.participant_count, 0),
     'totalAnswerCount', coalesce(v_stats.total_answer_count, 0),
+    'scoredParticipantCount', coalesce(v_scored_participant_count, 0),
+    'hasRehearsalResults', coalesce(v_stats.total_answer_count, 0) > 0 or coalesce(v_scored_participant_count, 0) > 0,
     'distribution', public.get_answer_distribution(v_event.room_code, v_state.current_question_id),
     'ranking', v_ranking,
     'serverNow', now()
@@ -1172,13 +1526,19 @@ grant execute on function public.get_room_snapshot(text) to anon, authenticated;
 grant execute on function public.get_answer_distribution(text, uuid) to anon, authenticated;
 grant execute on function public.get_ranking(text) to anon, authenticated;
 grant execute on function public.get_my_answer(text, uuid, text, uuid) to anon, authenticated;
+grant execute on function public.admin_set_password(text, text, text) to anon, authenticated;
+grant execute on function public.admin_verify_password(text, text) to anon, authenticated;
+grant execute on function public.admin_change_password(text, text, text) to anon, authenticated;
 
 grant execute on function public.admin_start_question(text, text, uuid) to anon, authenticated;
 grant execute on function public.admin_close_question(text, text) to anon, authenticated;
 grant execute on function public.admin_reveal_answer(text, text) to anon, authenticated;
 grant execute on function public.admin_show_ranking(text, text) to anon, authenticated;
 grant execute on function public.admin_finish_event(text, text) to anon, authenticated;
-grant execute on function public.admin_upsert_question(text, text, uuid, integer, text, text, text, text, text, integer, integer) to anon, authenticated;
+grant execute on function public.admin_update_event(text, text, text) to anon, authenticated;
+grant execute on function public.admin_reopen_event(text, text) to anon, authenticated;
+grant execute on function public.admin_reset_run(text, text) to anon, authenticated;
+grant execute on function public.admin_upsert_question(text, text, uuid, integer, text, text, text, text, text, integer, integer, text, integer, boolean) to anon, authenticated;
 grant execute on function public.admin_delete_question(text, text, uuid) to anon, authenticated;
 grant execute on function public.admin_reorder_questions(text, text, uuid[]) to anon, authenticated;
 grant execute on function public.get_admin_room_snapshot(text, text) to anon, authenticated;
@@ -1189,6 +1549,7 @@ revoke all on function public.refresh_participant_count() from public, anon, aut
 revoke all on function public.create_question_stats() from public, anon, authenticated;
 revoke all on function public.apply_answer_stats() from public, anon, authenticated;
 revoke all on function public.require_admin_event(text, text) from public, anon, authenticated;
+revoke all on function public.validate_admin_password(text) from public, anon, authenticated;
 
 do $$
 begin

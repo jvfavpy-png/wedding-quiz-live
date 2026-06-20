@@ -7,6 +7,9 @@ export const sampleQuestions: Array<Omit<AdminQuestion, "id">> = [
     options: ["職場", "友人の紹介", "マッチングアプリ", "旅行先"],
     correctIndex: 1,
     timeLimitSec: 10,
+    difficulty: "easy",
+    basePoints: 50,
+    speedBonusEnabled: true,
   },
   {
     orderNo: 2,
@@ -14,6 +17,9 @@ export const sampleQuestions: Array<Omit<AdminQuestion, "id">> = [
     options: ["花", "アクセサリー", "お菓子", "手紙"],
     correctIndex: 2,
     timeLimitSec: 10,
+    difficulty: "normal",
+    basePoints: 100,
+    speedBonusEnabled: true,
   },
   {
     orderNo: 3,
@@ -21,6 +27,9 @@ export const sampleQuestions: Array<Omit<AdminQuestion, "id">> = [
     options: ["寝落ち", "返信の速さ", "服の脱ぎっぱなし", "食べすぎ"],
     correctIndex: 2,
     timeLimitSec: 10,
+    difficulty: "hard",
+    basePoints: 150,
+    speedBonusEnabled: true,
   },
   {
     orderNo: 4,
@@ -28,6 +37,9 @@ export const sampleQuestions: Array<Omit<AdminQuestion, "id">> = [
     options: ["北海道", "九州", "沖縄", "関西"],
     correctIndex: 2,
     timeLimitSec: 10,
+    difficulty: "special",
+    basePoints: 200,
+    speedBonusEnabled: true,
   },
   {
     orderNo: 5,
@@ -35,5 +47,8 @@ export const sampleQuestions: Array<Omit<AdminQuestion, "id">> = [
     options: ["お金", "健康", "笑い", "家族時間"],
     correctIndex: 3,
     timeLimitSec: 10,
+    difficulty: "final",
+    basePoints: 300,
+    speedBonusEnabled: false,
   },
 ];

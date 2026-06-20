@@ -11,5 +11,5 @@ export default async function AdminRoomPage({
   const query = await searchParams;
   const key = Array.isArray(query.key) ? query.key[0] : query.key;
 
-  return <AdminRoomClient roomCode={roomCode} adminKey={key ?? ""} />;
+  return <AdminRoomClient roomCode={roomCode} legacyKey={key ?? ""} />;
 }

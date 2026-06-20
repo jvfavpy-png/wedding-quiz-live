@@ -13,7 +13,11 @@ export type AdminAction =
   | "close_question"
   | "reveal_answer"
   | "show_ranking"
-  | "finish_event";
+  | "finish_event"
+  | "reset_run"
+  | "reopen_event";
+
+export type QuestionDifficulty = "easy" | "normal" | "hard" | "special" | "final";
 
 export interface PublicEvent {
   id: string;
@@ -37,6 +41,9 @@ export interface PublicQuestion {
   options: [string, string, string, string];
   correctIndex: number | null;
   timeLimitSec: number;
+  difficulty: QuestionDifficulty;
+  basePoints: number;
+  speedBonusEnabled: boolean;
 }
 
 export interface AdminQuestion extends Omit<PublicQuestion, "correctIndex"> {
@@ -80,6 +87,9 @@ export interface MyAnswer {
   responseMs: number;
   isCorrect: boolean | null;
   point: number | null;
+  basePoints: number | null;
+  speedBonus: number | null;
+  totalScore: number | null;
 }
 
 export interface AdminSnapshot {
@@ -88,6 +98,8 @@ export interface AdminSnapshot {
   questions: AdminQuestion[];
   participantCount: number;
   totalAnswerCount: number;
+  scoredParticipantCount: number;
+  hasRehearsalResults: boolean;
   distribution: AnswerDistribution;
   ranking: RankingEntry[];
   serverNow: string;
@@ -95,7 +107,6 @@ export interface AdminSnapshot {
 
 export interface CreatedEvent {
   event: PublicEvent;
-  adminKey: string;
   adminUrl: string;
   joinUrl: string;
   screenUrl: string;

@@ -20,6 +20,8 @@ export interface RuleQuestion {
   eventId: string;
   correctIndex: number;
   timeLimitSec: number;
+  basePoints: number;
+  speedBonusEnabled: boolean;
 }
 
 export interface RuleLiveState {
@@ -49,6 +51,8 @@ export interface SubmitAnswerRuleResult {
   selectedIndex: number;
   responseMs: number;
   isCorrect: boolean;
+  basePoints: number;
+  speedBonus: number;
   point: number;
   nextScore: number;
 }
@@ -101,27 +105,45 @@ export function evaluateSubmitAnswer(input: SubmitAnswerRuleInput): SubmitAnswer
   }
 
   const isCorrect = input.question.correctIndex === input.selectedIndex;
-  const point = calculatePoint(isCorrect, responseMs);
+  const pointBreakdown = calculatePoint(
+    isCorrect,
+    responseMs,
+    input.question.basePoints,
+    input.question.speedBonusEnabled,
+  );
 
   return {
     selectedIndex: input.selectedIndex,
     responseMs,
     isCorrect,
-    point,
-    nextScore: input.participant.score + point,
+    basePoints: pointBreakdown.basePoints,
+    speedBonus: pointBreakdown.speedBonus,
+    point: pointBreakdown.point,
+    nextScore: input.participant.score + pointBreakdown.point,
   };
 }
 
 export function assertAdminKeyMatches(actual: string, expected: string): void {
   if (!actual || actual !== expected) {
-    throw new QuizRuleError("管理キーが正しくありません");
+    throw new QuizRuleError("管理者用パスワードの認証が必要です");
   }
 }
 
 export function nextPhaseForAdminAction(
   phase: Phase,
-  action: "start_question" | "close_question" | "reveal_answer" | "show_ranking" | "finish_event",
+  action:
+    | "start_question"
+    | "close_question"
+    | "reveal_answer"
+    | "show_ranking"
+    | "finish_event"
+    | "reset_run"
+    | "reopen_event",
 ): Phase {
+  if (action === "reset_run" || action === "reopen_event") {
+    return "lobby";
+  }
+
   if (action === "finish_event") {
     return "finished";
   }

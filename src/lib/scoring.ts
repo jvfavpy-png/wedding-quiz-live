@@ -14,6 +14,31 @@ export function speedBonus(responseMs: number): number {
   return 10;
 }
 
-export function calculatePoint(isCorrect: boolean, responseMs: number): number {
-  return isCorrect ? 100 + speedBonus(responseMs) : 0;
+export interface PointBreakdown {
+  basePoints: number;
+  speedBonus: number;
+  point: number;
+}
+
+export function calculatePoint(
+  isCorrect: boolean,
+  responseMs: number,
+  basePoints: number,
+  speedBonusEnabled: boolean,
+): PointBreakdown {
+  if (!isCorrect) {
+    return {
+      basePoints: 0,
+      speedBonus: 0,
+      point: 0,
+    };
+  }
+
+  const awardedSpeedBonus = speedBonusEnabled ? speedBonus(responseMs) : 0;
+
+  return {
+    basePoints,
+    speedBonus: awardedSpeedBonus,
+    point: basePoints + awardedSpeedBonus,
+  };
 }

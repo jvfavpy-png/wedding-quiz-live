@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { PartyPopper, Users } from "lucide-react";
+import { buildPublicRoomUrls, resolveAppBaseUrl } from "@/lib/app-url";
 import { useLiveRoom } from "@/lib/use-live-room";
 import { isRevealPhase, normalizeRoomCode } from "@/lib/utils";
 import { LoadingState } from "@/components/ui/loading-state";
@@ -11,6 +12,9 @@ import { QRCodeBlock } from "@/components/quiz/qr-code-block";
 import { CountdownText } from "@/components/quiz/countdown-text";
 import { AnswerDistributionChart } from "@/components/quiz/answer-distribution";
 import { RankingList } from "@/components/quiz/ranking-list";
+import { QuestionScoreBadges } from "@/components/quiz/question-score-badges";
+import { ConnectionStatus } from "@/components/quiz/connection-status";
+import { ConfettiBurst } from "@/components/effects/confetti-burst";
 
 interface ScreenClientProps {
   roomCode: string;
@@ -22,9 +26,7 @@ export function ScreenClient({ roomCode }: ScreenClientProps) {
   const [origin] = useState(() => (typeof window === "undefined" ? "" : window.location.origin));
 
   const joinUrl = useMemo(() => {
-    const base = process.env.NEXT_PUBLIC_APP_URL || origin || "";
-    const encodedRoom = encodeURIComponent(normalizedRoomCode);
-    return base ? `${base}/join/${encodedRoom}` : `/join/${encodedRoom}`;
+    return buildPublicRoomUrls(resolveAppBaseUrl({ windowOrigin: origin }), normalizedRoomCode).joinUrl;
   }, [normalizedRoomCode, origin]);
 
   const snapshot = live.snapshot;
@@ -56,8 +58,8 @@ export function ScreenClient({ roomCode }: ScreenClientProps) {
 
   return (
     <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,#fff1b8_0%,transparent_32%),linear-gradient(135deg,#fff8e7_0%,#ffffff_38%,#ffe1ea_70%,#dfe9ff_100%)] p-8 text-[#13294b]">
-      <div className="mx-auto grid h-[calc(100vh-64px)] max-w-[1600px] grid-rows-[auto_1fr] gap-6">
-        <header className="flex items-center justify-between gap-6 rounded-3xl bg-white/80 px-8 py-5 shadow-xl shadow-[#13294b]/10">
+      <div className="mx-auto grid h-[calc(100vh-64px)] max-w-[1600px] grid-rows-[auto_auto_1fr] gap-6">
+        <header className="flex items-center justify-between gap-6 rounded-3xl border border-white/70 bg-white/85 px-8 py-5 shadow-xl shadow-[#13294b]/10">
           <div className="min-w-0">
             <p className="flex items-center gap-3 text-2xl font-black text-[#d89a22]">
               <PartyPopper className="size-8" aria-hidden="true" />
@@ -79,7 +81,7 @@ export function ScreenClient({ roomCode }: ScreenClientProps) {
           </div>
         </header>
 
-        {live.error ? <ErrorMessage message={live.error} /> : null}
+        <ConnectionStatus status={live.realtimeStatus} error={live.error} onRefresh={live.refresh} screen />
 
         {phase === "lobby" ? (
           <section className="grid grid-cols-[1.1fr_420px] items-center gap-10 rounded-3xl bg-white/68 p-10 shadow-xl shadow-[#13294b]/10">
@@ -98,7 +100,12 @@ export function ScreenClient({ roomCode }: ScreenClientProps) {
         {question && phase === "question" ? (
           <section className="grid grid-cols-[1fr_320px] gap-8 rounded-3xl bg-white/72 p-10 shadow-xl shadow-[#13294b]/10">
             <div className="grid content-center gap-8">
-              <p className="text-4xl font-black text-[#d89a22]">Q{question.orderNo}</p>
+              <div>
+                <p className="text-4xl font-black text-[#d89a22]">Q{question.orderNo}</p>
+                <div className="mt-3">
+                  <QuestionScoreBadges question={question} large showDifficulty={false} showSpeedBonus={false} />
+                </div>
+              </div>
               <h2 className="text-7xl font-black leading-tight tracking-normal">{question.text}</h2>
               <div className="grid gap-4">
                 {question.options.map((option, index) => (
@@ -129,21 +136,29 @@ export function ScreenClient({ roomCode }: ScreenClientProps) {
         {question && phase === "closed" ? (
           <section className="grid gap-6 rounded-3xl bg-white/72 p-10 shadow-xl shadow-[#13294b]/10">
             <div>
-              <p className="text-4xl font-black text-[#d89a22]">回答締切</p>
+              <p className="text-4xl font-black text-[#d89a22]">回答を締め切りました。</p>
+              <div className="mt-3">
+                <QuestionScoreBadges question={question} large showDifficulty={false} showSpeedBonus={false} />
+              </div>
               <h2 className="mt-2 text-6xl font-black tracking-normal">{question.text}</h2>
             </div>
+            <p className="text-3xl font-black text-slate-700">
+              正解発表まで少しお待ちください。回答数 {live.distribution?.total ?? 0}
+            </p>
             <AnswerDistributionChart distribution={live.distribution} screen />
           </section>
         ) : null}
 
         {question && phase === "answer" ? (
-          <section className="grid grid-cols-[1fr_1fr] gap-8 rounded-3xl bg-white/72 p-10 shadow-xl shadow-[#13294b]/10">
+          <section className="relative grid grid-cols-[1fr_1fr] gap-8 overflow-hidden rounded-3xl bg-white/72 p-10 shadow-xl shadow-[#13294b]/10">
+            <ConfettiBurst active />
             <div className="grid content-center gap-6">
               <p className="text-4xl font-black text-[#d89a22]">正解発表</p>
+              <QuestionScoreBadges question={question} large showDifficulty={false} showSpeedBonus={false} />
               <h2 className="text-6xl font-black leading-tight tracking-normal">{question.text}</h2>
               {typeof question.correctIndex === "number" ? (
                 <div className="rounded-3xl bg-[#ffe7a3] p-8 text-[#6d4b00] shadow-xl">
-                  <p className="text-3xl font-black">正解</p>
+                  <p className="text-3xl font-black">正解は、{String.fromCharCode(65 + question.correctIndex)}！</p>
                   <p className="mt-2 text-6xl font-black">
                     {String.fromCharCode(65 + question.correctIndex)}.{" "}
                     {question.options[question.correctIndex]}
@@ -156,7 +171,8 @@ export function ScreenClient({ roomCode }: ScreenClientProps) {
         ) : null}
 
         {phase === "ranking" ? (
-          <section className="grid gap-6 rounded-3xl bg-white/72 p-10 shadow-xl shadow-[#13294b]/10">
+          <section className="relative grid gap-6 overflow-hidden rounded-3xl bg-white/72 p-10 shadow-xl shadow-[#13294b]/10">
+            <ConfettiBurst active />
             <div className="flex items-end justify-between gap-6">
               <div>
                 <p className="text-4xl font-black text-[#d89a22]">TOP 10</p>
@@ -169,7 +185,8 @@ export function ScreenClient({ roomCode }: ScreenClientProps) {
         ) : null}
 
         {phase === "finished" ? (
-          <section className="grid gap-6 rounded-3xl bg-white/72 p-10 shadow-xl shadow-[#13294b]/10">
+          <section className="relative grid gap-6 overflow-hidden rounded-3xl bg-white/72 p-10 shadow-xl shadow-[#13294b]/10">
+            <ConfettiBurst active />
             <div>
               <p className="text-4xl font-black text-[#d89a22]">Final Result</p>
               <h2 className="text-7xl font-black tracking-normal">最終結果</h2>

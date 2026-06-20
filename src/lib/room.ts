@@ -1,4 +1,5 @@
 import { randomBytes } from "crypto";
+import { buildPublicRoomUrls, resolveAppBaseUrl } from "@/lib/app-url";
 
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -14,26 +15,9 @@ export function generateAdminKey(): string {
 }
 
 export function getAppBaseUrl(request?: Request): string {
-  const envUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (envUrl) {
-    return envUrl.replace(/\/$/, "");
-  }
-
-  if (request) {
-    return new URL(request.url).origin;
-  }
-
-  return "http://localhost:3000";
+  return resolveAppBaseUrl({ requestUrl: request?.url });
 }
 
-export function buildRoomUrls(baseUrl: string, roomCode: string, adminKey: string) {
-  const normalizedBase = baseUrl.replace(/\/$/, "");
-  const encodedRoom = encodeURIComponent(roomCode);
-  const encodedKey = encodeURIComponent(adminKey);
-
-  return {
-    adminUrl: `${normalizedBase}/admin/${encodedRoom}?key=${encodedKey}`,
-    joinUrl: `${normalizedBase}/join/${encodedRoom}`,
-    screenUrl: `${normalizedBase}/screen/${encodedRoom}`,
-  };
+export function buildRoomUrls(baseUrl: string, roomCode: string) {
+  return buildPublicRoomUrls(baseUrl, roomCode);
 }

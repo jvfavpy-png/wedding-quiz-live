@@ -25,6 +25,8 @@ function baseInput(overrides: Partial<SubmitAnswerRuleInput> = {}): SubmitAnswer
       eventId: "event-1",
       correctIndex: 2,
       timeLimitSec: 10,
+      basePoints: 150,
+      speedBonusEnabled: true,
     },
     liveState: {
       phase: "question",
@@ -43,8 +45,29 @@ describe("submit_answer rules", () => {
     expect(evaluateSubmitAnswer(baseInput())).toMatchObject({
       responseMs: 1800,
       isCorrect: true,
-      point: 150,
-      nextScore: 350,
+      basePoints: 150,
+      speedBonus: 50,
+      point: 200,
+      nextScore: 400,
+    });
+  });
+
+  it("DB上のbasePointsを使い、クライアント点数を信用しない", () => {
+    expect(
+      evaluateSubmitAnswer(
+        baseInput({
+          question: {
+            ...baseInput().question!,
+            basePoints: 300,
+            speedBonusEnabled: false,
+          },
+        }),
+      ),
+    ).toMatchObject({
+      basePoints: 300,
+      speedBonus: 0,
+      point: 300,
+      nextScore: 500,
     });
   });
 
@@ -82,6 +105,8 @@ describe("submit_answer rules", () => {
   it("不正解は0点でscoreを増やさない", () => {
     expect(evaluateSubmitAnswer(baseInput({ selectedIndex: 1 }))).toMatchObject({
       isCorrect: false,
+      basePoints: 0,
+      speedBonus: 0,
       point: 0,
       nextScore: 200,
     });
@@ -89,7 +114,7 @@ describe("submit_answer rules", () => {
 });
 
 describe("admin rules", () => {
-  it("adminKey不一致を拒否する", () => {
+  it("管理者用パスワード相当の認証不一致を拒否する", () => {
     expect(() => assertAdminKeyMatches("wrong", "expected")).toThrow(QuizRuleError);
   });
 
@@ -98,6 +123,8 @@ describe("admin rules", () => {
     expect(nextPhaseForAdminAction("question", "close_question")).toBe("closed");
     expect(nextPhaseForAdminAction("closed", "reveal_answer")).toBe("answer");
     expect(nextPhaseForAdminAction("answer", "show_ranking")).toBe("ranking");
+    expect(nextPhaseForAdminAction("finished", "reopen_event")).toBe("lobby");
+    expect(nextPhaseForAdminAction("ranking", "reset_run")).toBe("lobby");
     expect(() => nextPhaseForAdminAction("question", "reveal_answer")).toThrow(
       "先に回答を締め切ってください",
     );

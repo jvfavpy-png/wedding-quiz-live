@@ -17,6 +17,9 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { PhaseBadge } from "@/components/quiz/phase-badge";
 import { CountdownText } from "@/components/quiz/countdown-text";
 import { RankingList } from "@/components/quiz/ranking-list";
+import { QuestionScoreBadges } from "@/components/quiz/question-score-badges";
+import { ConnectionStatus } from "@/components/quiz/connection-status";
+import { ConfettiBurst } from "@/components/effects/confetti-burst";
 import type { MyAnswer, ParticipantSession, Phase } from "@/types/quiz";
 
 interface JoinRoomClientProps {
@@ -155,6 +158,9 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
           responseMs: result.responseMs,
           isCorrect: null,
           point: null,
+          basePoints: null,
+          speedBonus: null,
+          totalScore: null,
         });
       }
 
@@ -189,6 +195,8 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
             </h1>
             <p className="mt-2 text-sm font-bold text-slate-600">roomCode: {normalizedRoomCode}</p>
           </header>
+
+          <ConnectionStatus status={live.realtimeStatus} error={live.error} onRefresh={live.refresh} />
 
           <Card className="grid gap-4">
             <CardTitle>参加する</CardTitle>
@@ -236,7 +244,7 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
   return (
     <main className="min-h-[100svh] bg-[linear-gradient(160deg,#fff8e7_0%,#ffffff_45%,#ffe1ea_100%)] px-4 py-5 text-[#13294b]">
       <div className="mx-auto grid w-full max-w-md gap-4">
-        <header className="rounded-2xl bg-white/80 p-4 shadow-lg shadow-[#13294b]/10">
+        <header className="rounded-2xl border border-white/70 bg-white/88 p-4 shadow-lg shadow-[#13294b]/10">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="truncate text-sm font-black text-slate-500">{snapshot?.event.title}</p>
@@ -244,9 +252,8 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
             </div>
             <PhaseBadge phase={phase} />
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
-            <span>接続: {live.realtimeStatus}</span>
-            <span>/ 参加者 {snapshot?.participantCount ?? 0}人</span>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-600">
+            <span>参加者 {snapshot?.participantCount ?? 0}人</span>
             <button
               type="button"
               onClick={live.refresh}
@@ -264,6 +271,8 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
             </button>
           </div>
         </header>
+
+        <ConnectionStatus status={live.realtimeStatus} error={live.error} onRefresh={live.refresh} />
 
         {editingName ? (
           <Card className="grid gap-3">
@@ -311,6 +320,9 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-sm font-black text-[#d89a22]">Q{question.orderNo}</p>
+                <div className="mb-2">
+                  <QuestionScoreBadges question={question} showDifficulty={false} showSpeedBonus={false} />
+                </div>
                 <CardTitle className="leading-snug">{question.text}</CardTitle>
               </div>
               {phase === "question" ? (
@@ -362,7 +374,8 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
         ) : null}
 
         {(phase === "ranking" || phase === "finished") && myRank ? (
-          <Card className="grid gap-3 text-center">
+          <Card className="relative grid gap-3 overflow-hidden text-center">
+            <ConfettiBurst active={myRank.rank <= 3} />
             <CardTitle>あなたの順位</CardTitle>
             <p className="text-5xl font-black text-[#13294b]">{myRank.rank}位</p>
             <p className="text-xl font-black text-[#d89a22]">{myRank.score}点</p>
@@ -402,9 +415,17 @@ function StatusMessage({
 
   if (phase === "question") {
     return answered ? (
-      <div className="flex items-center gap-2 rounded-xl bg-[#d8f7eb] p-4 font-black text-[#075d4b]">
-        <CheckCircle2 className="size-5" aria-hidden="true" />
-        回答を受け付けました。変更はできません。
+      <div className="grid gap-2 rounded-xl bg-[#d8f7eb] p-4 font-black text-[#075d4b]">
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="size-5" aria-hidden="true" />
+          回答を受け付けました。
+        </div>
+        <p className="text-sm font-bold text-[#075d4b]">正解発表までお待ちください。</p>
+        {myAnswer ? (
+          <p className="rounded-lg bg-white/70 px-3 py-2 text-sm text-[#13294b]">
+            あなたの回答: {String.fromCharCode(65 + myAnswer.selectedIndex)}
+          </p>
+        ) : null}
       </div>
     ) : (
       <p className="rounded-xl bg-[#fff6d8] p-4 text-sm font-black text-[#6d4b00]">
@@ -435,6 +456,26 @@ function StatusMessage({
         <p className="mt-1 text-sm font-bold text-slate-600">
           {myAnswer.point === null ? "点数は正解発表後に表示されます" : `${myAnswer.point}点 / ${myAnswer.responseMs}ms`}
         </p>
+        {myAnswer.point !== null ? (
+          <div className="mt-3 grid grid-cols-2 gap-2 text-left text-xs font-black text-slate-600">
+            <div className="rounded-lg bg-[#fff6d8] p-2">
+              基本得点<br />
+              <span className="text-[#13294b]">{myAnswer.basePoints ?? 0}点</span>
+            </div>
+            <div className="rounded-lg bg-[#fff6d8] p-2">
+              速度ボーナス<br />
+              <span className="text-[#13294b]">+{myAnswer.speedBonus ?? 0}点</span>
+            </div>
+            <div className="rounded-lg bg-[#d8f7eb] p-2">
+              今回の獲得点<br />
+              <span className="text-[#075d4b]">{myAnswer.point}点</span>
+            </div>
+            <div className="rounded-lg bg-[#d8f7eb] p-2">
+              累計得点<br />
+              <span className="text-[#075d4b]">{myAnswer.totalScore ?? "-"}点</span>
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   }
