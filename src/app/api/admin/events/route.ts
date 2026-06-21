@@ -1,10 +1,13 @@
 import { okJson, errorJson, readJsonBody } from "@/lib/api-response";
 import { validateAdminPasswordConfirmation } from "@/lib/admin-password";
 import { buildAdminSessionCookie, getInternalAdminEvent, requireAdminSession } from "@/lib/admin-session";
+import { normalizeDesignTheme } from "@/lib/design-themes";
+import { normalizeRunMode } from "@/lib/run-mode";
 import { buildRoomUrls, generateAdminKey, generateRoomCode, getAppBaseUrl } from "@/lib/room";
 import { sampleQuestions } from "@/lib/sample-data";
-import { getSupabaseAnonServerClient, getSupabaseServiceClient } from "@/lib/supabase/server";
-import type { CreatedEvent } from "@/types/quiz";
+import { isValidRevealDelaySeconds, normalizeSoundSettings } from "@/lib/sound-settings";
+import { getSupabaseServiceClient } from "@/lib/supabase/server";
+import type { CreatedEvent, DesignThemeId, EventRunMode, SoundSettings } from "@/types/quiz";
 
 interface CreateEventBody {
   title?: string;
@@ -15,6 +18,9 @@ interface CreateEventBody {
 interface UpdateEventBody {
   roomCode: string;
   title: string;
+  designTheme?: DesignThemeId;
+  runMode?: EventRunMode;
+  sound?: SoundSettings;
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -42,7 +48,7 @@ export async function POST(request: Request): Promise<Response> {
           room_code: roomCode,
           admin_key: adminKey,
         })
-        .select("id,title,room_code,status")
+        .select("id,title,room_code,status,design_theme,run_mode,sound_enabled,visual_effects_enabled,sound_pack,effect_style,screen_volume,reveal_delay_seconds,screen_confetti_enabled,guest_sound_enabled,guest_effects_enabled")
         .single();
 
       if (error) {
@@ -60,6 +66,9 @@ export async function POST(request: Request): Promise<Response> {
           title: data.title,
           roomCode: data.room_code,
           status: data.status,
+          designTheme: normalizeDesignTheme(data.design_theme),
+          runMode: normalizeRunMode(data.run_mode),
+          sound: normalizeSoundSettings(data),
         },
         ...urls,
       };
@@ -127,18 +136,52 @@ export async function PATCH(request: Request): Promise<Response> {
     }
 
     const event = await requireAdminSession(request, body.roomCode);
-    const supabase = getSupabaseAnonServerClient();
-    const { data, error } = await supabase.rpc("admin_update_event", {
-      p_room_code: body.roomCode,
-      p_admin_key: event.admin_key,
-      p_title: title,
-    });
+    const designTheme = normalizeDesignTheme(body.designTheme);
+    const runMode = normalizeRunMode(body.runMode);
+    if (body.sound && !isValidRevealDelaySeconds(body.sound.revealDelaySeconds)) {
+      throw new Error("正解発表前の待ち時間は0.0〜5.0秒で設定してください。");
+    }
+    const sound = body.sound ? normalizeSoundSettings(body.sound) : null;
+    const supabase = getSupabaseServiceClient();
+    const { data, error } = await supabase
+      .from("events")
+      .update({
+        title,
+        design_theme: designTheme,
+        run_mode: runMode,
+        ...(sound
+          ? {
+              sound_enabled: sound.soundEnabled,
+              visual_effects_enabled: sound.visualEffectsEnabled,
+              sound_pack: sound.soundPack,
+              effect_style: sound.effectStyle,
+              screen_volume: sound.screenVolume,
+              reveal_delay_seconds: sound.revealDelaySeconds,
+              screen_confetti_enabled: sound.screenConfettiEnabled,
+              guest_sound_enabled: sound.guestSoundEnabled,
+              guest_effects_enabled: sound.guestEffectsEnabled,
+            }
+          : {}),
+      })
+      .eq("id", event.id)
+      .select("id,title,room_code,status,design_theme,run_mode,sound_enabled,visual_effects_enabled,sound_pack,effect_style,screen_volume,reveal_delay_seconds,screen_confetti_enabled,guest_sound_enabled,guest_effects_enabled")
+      .single();
 
     if (error) {
       throw new Error(error.message);
     }
 
-    return okJson(data);
+    return okJson({
+      event: {
+        id: data.id,
+        title: data.title,
+        roomCode: data.room_code,
+        status: data.status,
+        designTheme: normalizeDesignTheme(data.design_theme),
+        runMode: normalizeRunMode(data.run_mode),
+        sound: normalizeSoundSettings(data),
+      },
+    });
   } catch (error) {
     const status = error instanceof Error && error.message.includes("認証") ? 401 : 400;
     return errorJson(error, status);

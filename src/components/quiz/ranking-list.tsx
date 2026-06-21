@@ -55,18 +55,34 @@ export function RankingList({
                 entry.rank
               )}
             </div>
-            <div className="min-w-0">
-              <p
+
+            <div className="flex min-w-0 items-center gap-3">
+              <div
                 className={cn(
-                  "truncate font-black text-[#13294b]",
-                  first && screen ? "text-5xl" : undefined,
-                  screen && !first ? "text-3xl" : "text-base",
+                  "grid shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--wql-accent-soft)] font-black text-[var(--wql-accent-text)]",
+                  first && screen ? "size-16 text-3xl" : screen ? "size-12 text-2xl" : "size-9 text-sm",
                 )}
               >
-                {entry.rank}位 {entry.name}
-              </p>
-              {highlighted ? <p className="text-xs font-bold text-[#9f1239]">あなたです</p> : null}
+                {entry.avatarUrl ? (
+                  <img src={entry.avatarUrl} alt="" className="size-full object-cover" loading="lazy" />
+                ) : (
+                  entry.name.slice(0, 1)
+                )}
+              </div>
+              <div className="min-w-0">
+                <p
+                  className={cn(
+                    "truncate font-black text-[#13294b]",
+                    first && screen ? "text-5xl" : undefined,
+                    screen && !first ? "text-3xl" : "text-base",
+                  )}
+                >
+                  {entry.rank}位 {entry.name}
+                </p>
+                {highlighted ? <p className="text-xs font-bold text-[#9f1239]">あなたです</p> : null}
+              </div>
             </div>
+
             <p className={cn("font-black text-[#13294b]", first && screen ? "text-6xl" : screen ? "text-4xl" : "text-xl")}>
               {entry.score}点
             </p>

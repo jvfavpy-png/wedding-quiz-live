@@ -1,10 +1,12 @@
 "use client";
 
-import { Flag, KeyRound, RefreshCw, RotateCcw, Save, ShieldAlert } from "lucide-react";
+import { Flag, KeyRound, Palette, RefreshCw, RotateCcw, Save, ShieldAlert } from "lucide-react";
 import { adminPasswordPlaceholders, minAdminPasswordLength } from "@/lib/admin-password";
+import { designThemeIds, designThemes, getThemeVars } from "@/lib/design-themes";
+import { SoundSettingsPanel } from "@/components/admin/sound-settings-panel";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
-import type { AdminAction, Phase } from "@/types/quiz";
+import type { AdminAction, DesignThemeId, Phase, SoundAsset, SoundKey, SoundSettings } from "@/types/quiz";
 
 export interface AdminPasswordFormState {
   currentPassword: string;
@@ -15,32 +17,48 @@ export interface AdminPasswordFormState {
 export function AdminSettingsTab({
   phase,
   eventTitle,
+  designTheme,
   editingLocked,
   adminAuthorized,
   busy,
   passwordForm,
+  soundSettings,
+  soundAssets,
   canFinish,
   canReopen,
   canReset,
   onEventTitleChange,
+  onDesignThemeChange,
   onSaveEventTitle,
   onPasswordFormChange,
+  onSoundSettingsChange,
   onChangeAdminPassword,
+  onSaveSoundSettings,
+  onUploadSound,
+  onDeleteSound,
   onControl,
 }: {
   phase: Phase;
   eventTitle: string;
+  designTheme: DesignThemeId;
   editingLocked: boolean;
   adminAuthorized: boolean;
   busy: string | null;
   passwordForm: AdminPasswordFormState;
+  soundSettings: SoundSettings;
+  soundAssets: SoundAsset[];
   canFinish: boolean;
   canReopen: boolean;
   canReset: boolean;
   onEventTitleChange: (title: string) => void;
+  onDesignThemeChange: (theme: DesignThemeId) => void;
   onSaveEventTitle: () => Promise<void>;
   onPasswordFormChange: (form: AdminPasswordFormState) => void;
+  onSoundSettingsChange: (settings: SoundSettings) => void;
   onChangeAdminPassword: () => Promise<void>;
+  onSaveSoundSettings: () => Promise<void>;
+  onUploadSound: (soundKey: SoundKey, file: File) => Promise<void>;
+  onDeleteSound: (soundKey: SoundKey) => Promise<void>;
   onControl: (action: AdminAction) => Promise<void>;
 }) {
   return (
@@ -76,7 +94,73 @@ export function AdminSettingsTab({
               保存
             </Button>
           </div>
+          <div className="grid gap-3">
+            <div className="flex items-center gap-2 text-sm font-black text-slate-600">
+              <Palette className="size-4 text-[var(--wql-accent-strong)]" aria-hidden="true" />
+              デザインテーマ
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {designThemeIds.map((themeId) => {
+                const theme = designThemes[themeId];
+                const selected = themeId === designTheme;
+
+                return (
+                  <button
+                    key={theme.id}
+                    type="button"
+                    onClick={() => onDesignThemeChange(theme.id)}
+                    className={[
+                      "grid gap-3 rounded-2xl border p-4 text-left transition",
+                      selected
+                        ? "border-[var(--wql-accent)] bg-[var(--wql-accent-soft)] shadow-lg"
+                        : "border-slate-200 bg-white hover:border-[var(--wql-accent)]",
+                    ].join(" ")}
+                    aria-pressed={selected}
+                  >
+                    <div
+                      className="rounded-xl p-3 shadow-inner"
+                      style={getThemeVars(theme.id)}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-black text-[var(--wql-accent-strong)]">
+                            {theme.tone}
+                          </p>
+                          <p className="text-base font-black text-[var(--wql-text)]">{theme.name}</p>
+                        </div>
+                        <div className="flex gap-1">
+                          {theme.swatches.map((swatch) => (
+                            <span
+                              key={swatch}
+                              className="size-5 rounded-full border border-white shadow"
+                              style={{ backgroundColor: swatch }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <div className="mt-3 rounded-lg bg-[var(--wql-card)] px-3 py-2 text-xs font-bold text-[var(--wql-text)]">
+                        Q1 ふたりクイズ / {selected ? "選択中" : "プレビュー"}
+                      </div>
+                    </div>
+                    <p className="text-xs font-bold leading-5 text-slate-600">{theme.description}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </Card>
+
+        <SoundSettingsPanel
+          settings={soundSettings}
+          designTheme={designTheme}
+          soundAssets={soundAssets}
+          busy={busy}
+          disabled={!adminAuthorized}
+          onChange={onSoundSettingsChange}
+          onSave={onSaveSoundSettings}
+          onUploadSound={onUploadSound}
+          onDeleteSound={onDeleteSound}
+        />
 
         <Card className="grid gap-4">
           <CardTitle>管理者用パスワード</CardTitle>

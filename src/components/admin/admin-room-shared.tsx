@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Clipboard, Monitor, Save, Smartphone, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Clipboard, ImagePlus, Monitor, Save, Smartphone, Trash2, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import {
   defaultBasePointsForDifficulty,
@@ -17,11 +17,14 @@ export const emptyQuestion: QuestionFormState = {
   orderNo: 0,
   text: "",
   options: ["", "", "", ""],
+  imageUrl: null,
+  optionImageUrls: [null, null, null, null],
   correctIndex: 0,
   timeLimitSec: 10,
   difficulty: "normal",
   basePoints: 100,
   speedBonusEnabled: true,
+  presenterNote: null,
 };
 
 export function Stat({ icon, label, value }: { icon: ReactNode; label: string; value: number }) {
@@ -32,6 +35,78 @@ export function Stat({ icon, label, value }: { icon: ReactNode; label: string; v
         <span className="text-xs font-black">{label}</span>
       </div>
       <p className="mt-1 text-3xl font-black text-[#13294b]">{value}</p>
+    </div>
+  );
+}
+
+function ImageUrlInput({
+  value,
+  disabled,
+  uploadBusy,
+  compact = false,
+  onChange,
+  onUpload,
+}: {
+  value: string | null;
+  disabled: boolean;
+  uploadBusy: boolean;
+  compact?: boolean;
+  onChange: (value: string | null) => void;
+  onUpload: (file: File) => void;
+}) {
+  return (
+    <div className={compact ? "grid gap-2" : "grid gap-2 sm:grid-cols-[1fr_auto]"}>
+      <input
+        value={value ?? ""}
+        onChange={(event) => onChange(event.target.value || null)}
+        disabled={disabled}
+        className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:ring-4 focus:ring-[#d9b56d]/40"
+        placeholder="画像URL またはアップロード"
+      />
+      <label className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-[#d9b56d] bg-white px-3 text-sm font-black text-[var(--wql-text)] transition hover:bg-[var(--wql-accent-soft)]">
+        <ImagePlus className="size-4" aria-hidden="true" />
+        {uploadBusy ? "アップロード中" : "画像"}
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          disabled={disabled || uploadBusy}
+          className="sr-only"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.currentTarget.value = "";
+            if (file) {
+              onUpload(file);
+            }
+          }}
+        />
+      </label>
+    </div>
+  );
+}
+
+function QuestionPreviewImage({
+  src,
+  alt,
+  small = false,
+  dark = false,
+}: {
+  src: string;
+  alt: string;
+  small?: boolean;
+  dark?: boolean;
+}) {
+  return (
+    <div className={small ? "mt-2 overflow-hidden rounded-lg" : "mt-3 overflow-hidden rounded-xl"}>
+      <img
+        src={src}
+        alt={alt}
+        className={[
+          "w-full object-cover",
+          small ? "max-h-24" : "max-h-48",
+          dark ? "bg-white/10" : "bg-slate-100",
+        ].join(" ")}
+        loading="lazy"
+      />
     </div>
   );
 }
@@ -93,6 +168,7 @@ export function QuestionEditor({
   onMoveUp,
   onMoveDown,
   editingLocked,
+  onUploadImage,
 }: {
   title: string;
   initial: QuestionFormState;
@@ -102,8 +178,10 @@ export function QuestionEditor({
   onMoveUp?: () => Promise<void>;
   onMoveDown?: () => Promise<void>;
   editingLocked: boolean;
+  onUploadImage?: (file: File, kind: "question" | "option") => Promise<string>;
 }) {
   const [draft, setDraft] = useState<QuestionFormState>(initial);
+  const [uploadingKey, setUploadingKey] = useState<string | null>(null);
   const isDirty = JSON.stringify(draft) !== JSON.stringify(initial);
 
   function updateOption(index: number, value: string) {
@@ -123,6 +201,32 @@ export function QuestionEditor({
       difficulty,
       basePoints: defaultBasePointsForDifficulty(difficulty),
     });
+  }
+
+  function updateOptionImage(index: number, value: string | null) {
+    const current = draft.optionImageUrls ?? [null, null, null, null];
+    const nextOptionImageUrls: [string | null, string | null, string | null, string | null] = [
+      current[0],
+      current[1],
+      current[2],
+      current[3],
+    ];
+    nextOptionImageUrls[index] = value;
+    setDraft({ ...draft, optionImageUrls: nextOptionImageUrls });
+  }
+
+  async function uploadImage(file: File, kind: "question" | "option", applyUrl: (url: string) => void, key: string) {
+    if (!onUploadImage) {
+      return;
+    }
+
+    try {
+      setUploadingKey(key);
+      const url = await onUploadImage(file, kind);
+      applyUrl(url);
+    } finally {
+      setUploadingKey(null);
+    }
   }
 
   return (
@@ -170,6 +274,45 @@ export function QuestionEditor({
         className="min-h-20 rounded-xl border border-slate-200 bg-white p-3 font-bold outline-none focus:ring-4 focus:ring-[#d9b56d]/40"
         placeholder="問題文"
       />
+
+      <div className="grid gap-3 rounded-xl bg-white/70 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs font-black text-slate-500">問題画像</span>
+          {draft.imageUrl ? (
+            <button
+              type="button"
+              onClick={() => setDraft({ ...draft, imageUrl: null })}
+              disabled={editingLocked}
+              className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs font-black text-slate-600"
+            >
+              <X className="size-3" aria-hidden="true" />
+              削除
+            </button>
+          ) : null}
+        </div>
+        <ImageUrlInput
+          value={draft.imageUrl}
+          disabled={editingLocked}
+          uploadBusy={uploadingKey === "question"}
+          onChange={(imageUrl) => setDraft({ ...draft, imageUrl })}
+          onUpload={(file) =>
+            uploadImage(file, "question", (imageUrl) => setDraft((current) => ({ ...current, imageUrl })), "question")
+          }
+        />
+        {draft.imageUrl ? <QuestionPreviewImage src={draft.imageUrl} alt="問題画像プレビュー" /> : null}
+      </div>
+
+      <label className="grid gap-1">
+        <span className="text-xs font-black text-slate-500">司会者メモ</span>
+        <textarea
+          value={draft.presenterNote ?? ""}
+          onChange={(event) => setDraft({ ...draft, presenterNote: event.target.value.slice(0, 500) })}
+          rows={2}
+          disabled={editingLocked}
+          className="min-h-16 rounded-xl border border-slate-200 bg-white p-3 text-sm font-bold outline-none focus:ring-4 focus:ring-[#d9b56d]/40"
+          placeholder="スクリーンやゲストには表示されません"
+        />
+      </label>
 
       <div className="grid gap-3 lg:grid-cols-3">
         <label className="grid gap-1">
@@ -230,6 +373,33 @@ export function QuestionEditor({
               disabled={editingLocked}
               className="min-h-11 rounded-lg border border-slate-200 px-3 font-bold outline-none focus:ring-4 focus:ring-[#d9b56d]/40"
             />
+            <ImageUrlInput
+              value={draft.optionImageUrls?.[index] ?? null}
+              disabled={editingLocked}
+              uploadBusy={uploadingKey === `option-${index}`}
+              compact
+              onChange={(imageUrl) => updateOptionImage(index, imageUrl)}
+              onUpload={(file) =>
+                uploadImage(file, "option", (imageUrl) => updateOptionImage(index, imageUrl), `option-${index}`)
+              }
+            />
+            {draft.optionImageUrls?.[index] ? (
+              <div className="grid gap-2">
+                <QuestionPreviewImage src={draft.optionImageUrls[index] ?? ""} alt={`${String.fromCharCode(65 + index)} 選択肢画像`} small />
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    updateOptionImage(index, null);
+                  }}
+                  disabled={editingLocked}
+                  className="inline-flex w-fit items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs font-black text-slate-600"
+                >
+                  <X className="size-3" aria-hidden="true" />
+                  画像削除
+                </button>
+              </div>
+            ) : null}
             <label className="mt-1 flex items-center gap-2 text-sm font-bold text-[#13294b]">
               <input
                 type="radio"

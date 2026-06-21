@@ -34,7 +34,21 @@ describe("participant session", () => {
     };
 
     expect(isParticipantSession(session)).toBe(true);
-    expect(parseParticipantSession(JSON.stringify(session))).toEqual(session);
+    expect(parseParticipantSession(JSON.stringify(session))).toEqual({
+      ...session,
+      avatarUrl: null,
+    });
+    expect(
+      parseParticipantSession(
+        JSON.stringify({
+          ...session,
+          avatarUrl: "https://example.com/avatar.png",
+        }),
+      ),
+    ).toEqual({
+      ...session,
+      avatarUrl: "https://example.com/avatar.png",
+    });
     expect(parseParticipantSession("{broken")).toBeNull();
     expect(parseParticipantSession(JSON.stringify({ participantId: "p1" }))).toBeNull();
   });

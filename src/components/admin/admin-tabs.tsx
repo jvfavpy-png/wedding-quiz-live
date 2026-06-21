@@ -1,10 +1,10 @@
 "use client";
 
 import type { ComponentType, SVGProps } from "react";
-import { CheckCircle2, ClipboardList, KeyRound, Link2, Play } from "lucide-react";
+import { CheckCircle2, ClipboardList, KeyRound, Link2, Play, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type AdminTabId = "progress" | "questions" | "urls" | "rehearsal" | "settings";
+export type AdminTabId = "progress" | "questions" | "participants" | "urls" | "rehearsal" | "settings";
 
 interface AdminTabMeta {
   id: AdminTabId;
@@ -28,6 +28,13 @@ export const adminTabs: AdminTabMeta[] = [
     shortLabel: "問題",
     description: "事前準備",
     Icon: ClipboardList,
+  },
+  {
+    id: "participants",
+    label: "参加者管理",
+    shortLabel: "参加者",
+    description: "名前と点数",
+    Icon: Users,
   },
   {
     id: "urls",
@@ -88,7 +95,7 @@ export function AdminTabs({
 }) {
   return (
     <nav
-      className="flex gap-2 overflow-x-auto rounded-2xl border border-white/70 bg-white/88 p-2 shadow-xl shadow-[#13294b]/10 backdrop-blur"
+      className="flex gap-2 overflow-x-auto rounded-2xl border border-white/70 bg-[var(--wql-card)] p-2 shadow-xl shadow-[#13294b]/10 backdrop-blur"
       aria-label="管理画面のタブ"
     >
       {adminTabs.map(({ id, label, shortLabel, description, Icon }) => {
@@ -102,8 +109,8 @@ export function AdminTabs({
             className={cn(
               "grid min-w-[116px] flex-1 place-items-center gap-1 rounded-xl px-3 py-3 text-center transition",
               active
-                ? "bg-[#13294b] text-white shadow-lg shadow-[#13294b]/20"
-                : "bg-white/65 text-[#13294b] hover:bg-[#fff6e4]",
+                ? "bg-[var(--wql-text)] text-white shadow-lg shadow-[#13294b]/20"
+                : "bg-white/65 text-[var(--wql-text)] hover:bg-[var(--wql-accent-soft)]",
             )}
             aria-current={active ? "page" : undefined}
           >

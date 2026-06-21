@@ -1,13 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Edit3, Loader2, PartyPopper, RefreshCw, Send, Trophy } from "lucide-react";
+import { Camera, CheckCircle2, Edit3, Loader2, PartyPopper, RefreshCw, Send, Trophy } from "lucide-react";
 import { fetchJson } from "@/lib/api-client";
 import {
   createParticipantToken,
   participantStorageKey,
   readParticipantSession,
 } from "@/lib/participant-session";
+import { getThemeVars } from "@/lib/design-themes";
+import { defaultSoundSettings, normalizeSoundSettings } from "@/lib/sound-settings";
 import { useLiveRoom } from "@/lib/use-live-room";
 import { isRevealPhase, normalizeRoomCode, phaseLabel } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -43,14 +45,70 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
   const [joining, setJoining] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [duplicateNameCount, setDuplicateNameCount] = useState(0);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
 
   const snapshot = live.snapshot;
+  const themeVars = getThemeVars(snapshot?.event.designTheme);
+  const soundSettings = normalizeSoundSettings(snapshot?.event.sound ?? defaultSoundSettings);
   const phase = snapshot?.liveState.phase ?? "lobby";
   const question = snapshot?.currentQuestion ?? null;
   const reveal = isRevealPhase(phase);
   const answered = Boolean(myAnswer && question && myAnswer.questionId === question.id);
   const canAnswer = phase === "question" && Boolean(question) && Boolean(session) && !answered && !submitting;
   const myRank = session ? live.ranking.find((entry) => entry.participantId === session.participantId) : undefined;
+
+  useEffect(() => {
+    return () => {
+      if (avatarPreviewUrl) {
+        URL.revokeObjectURL(avatarPreviewUrl);
+      }
+    };
+  }, [avatarPreviewUrl]);
+
+  useEffect(() => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      return;
+    }
+
+    let active = true;
+    const timer = setTimeout(() => {
+      void fetchJson<{ duplicateCount: number }>(
+        `/api/rooms/${encodeURIComponent(normalizedRoomCode)}/name-check?name=${encodeURIComponent(trimmedName)}`,
+      )
+        .then((result) => {
+          if (active) {
+            const currentOwnName = session?.name === trimmedName ? 1 : 0;
+            setDuplicateNameCount(Math.max(0, result.duplicateCount - currentOwnName));
+          }
+        })
+        .catch(() => {
+          if (active) {
+            setDuplicateNameCount(0);
+          }
+        });
+    }, 400);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [name, normalizedRoomCode, session?.name]);
+
+  const changeName = useCallback((value: string) => {
+    const nextName = value.slice(0, 20);
+    setName(nextName);
+    if (!nextName.trim()) {
+      setDuplicateNameCount(0);
+    }
+  }, []);
+
+  const changeAvatarFile = useCallback((file: File | null) => {
+    setAvatarFile(file);
+    setAvatarPreviewUrl(file ? URL.createObjectURL(file) : null);
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -121,15 +179,40 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
           participantToken,
         }),
       });
-      setSession(participant);
+      let nextParticipant = participant;
+      if (avatarFile) {
+        try {
+          const avatarUrl = await uploadAvatar(participant, avatarFile);
+          nextParticipant = { ...participant, avatarUrl };
+        } catch {
+          setError("参加は完了しましたが、プロフィール画像のアップロードに失敗しました。あとから再設定できます。");
+        }
+      }
+      setSession(nextParticipant);
       setEditingName(false);
-      window.localStorage.setItem(storageKey, JSON.stringify(participant));
+      setAvatarFile(null);
+      setAvatarPreviewUrl(null);
+      window.localStorage.setItem(storageKey, JSON.stringify(nextParticipant));
       await live.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "参加に失敗しました");
     } finally {
       setJoining(false);
     }
+  }
+
+  async function uploadAvatar(participant: ParticipantSession, file: File): Promise<string> {
+    const form = new FormData();
+    form.set("roomCode", normalizedRoomCode);
+    form.set("participantId", participant.participantId);
+    form.set("participantToken", participant.participantToken);
+    form.set("file", file);
+
+    const uploaded = await fetchJson<{ publicUrl: string }>("/api/participants/avatar", {
+      method: "POST",
+      body: form,
+    });
+    return uploaded.publicUrl;
   }
 
   async function submitAnswer(selectedIndex: number) {
@@ -176,7 +259,7 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
 
   if (live.loading && !snapshot) {
     return (
-      <main className="min-h-[100svh] bg-[#fff8e7] p-4">
+      <main className="min-h-[100svh] bg-[var(--wql-bg)] p-4" style={themeVars}>
         <LoadingState label="イベントを確認しています" />
       </main>
     );
@@ -184,7 +267,10 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
 
   if (!session) {
     return (
-      <main className="min-h-[100svh] bg-[linear-gradient(160deg,#fff8e7_0%,#ffffff_46%,#ffe1ea_100%)] px-4 py-6 text-[#13294b]">
+      <main
+        className="min-h-[100svh] px-4 py-6 text-[var(--wql-text)]"
+        style={{ ...themeVars, background: "var(--wql-page-gradient)" }}
+      >
         <div className="mx-auto grid min-h-[calc(100svh-48px)] w-full max-w-md content-center gap-5">
           <header className="text-center">
             <div className="mx-auto mb-4 grid size-16 place-items-center rounded-full bg-[#ffe7a3] text-[#6d4b00] shadow-lg">
@@ -210,12 +296,18 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
               <span className="text-sm font-black text-slate-600">お名前</span>
               <input
                 value={name}
-                onChange={(event) => setName(event.target.value.slice(0, 20))}
+                onChange={(event) => changeName(event.target.value)}
                 className="min-h-14 rounded-xl border border-[#d9b56d]/60 bg-white px-4 text-lg font-bold outline-none ring-[#d9b56d] focus:ring-4"
                 placeholder="例：たろう"
                 maxLength={20}
               />
             </label>
+            {duplicateNameCount > 0 ? (
+              <div className="rounded-xl bg-[#fff6d8] p-3 text-xs font-black leading-5 text-[#6d4b00]">
+                同じ名前の参加者がいます。ランキングで分かりやすいように、少し変えて入力するのがおすすめです。
+              </div>
+            ) : null}
+            <AvatarPicker avatarUrl={avatarPreviewUrl} disabled={joining} onChange={changeAvatarFile} />
             <Button
               size="lg"
               icon={joining ? <Loader2 className="size-5 animate-spin" /> : <Send className="size-5" />}
@@ -242,13 +334,19 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
   }
 
   return (
-    <main className="min-h-[100svh] bg-[linear-gradient(160deg,#fff8e7_0%,#ffffff_45%,#ffe1ea_100%)] px-4 py-5 text-[#13294b]">
+      <main
+        className="min-h-[100svh] px-4 py-5 text-[var(--wql-text)]"
+        style={{ ...themeVars, background: "var(--wql-page-gradient)" }}
+      >
       <div className="mx-auto grid w-full max-w-md gap-4">
         <header className="rounded-2xl border border-white/70 bg-white/88 p-4 shadow-lg shadow-[#13294b]/10">
           <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-black text-slate-500">{snapshot?.event.title}</p>
-              <h1 className="truncate text-2xl font-black">{session.name}</h1>
+            <div className="flex min-w-0 items-center gap-3">
+              <ParticipantAvatar name={session.name} avatarUrl={session.avatarUrl} />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-black text-slate-500">{snapshot?.event.title}</p>
+                <h1 className="truncate text-2xl font-black">{session.name}</h1>
+              </div>
             </div>
             <PhaseBadge phase={phase} />
           </div>
@@ -279,10 +377,16 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
             <CardTitle>名前を修正</CardTitle>
             <input
               value={name}
-              onChange={(event) => setName(event.target.value.slice(0, 20))}
+              onChange={(event) => changeName(event.target.value)}
               className="min-h-12 rounded-xl border border-[#d9b56d]/60 bg-white px-4 font-bold outline-none ring-[#d9b56d] focus:ring-4"
               maxLength={20}
             />
+            {duplicateNameCount > 0 ? (
+              <div className="rounded-xl bg-[#fff6d8] p-3 text-xs font-black leading-5 text-[#6d4b00]">
+                同じ名前の参加者がいます。必要なら少し変えてください。
+              </div>
+            ) : null}
+            <AvatarPicker avatarUrl={avatarPreviewUrl ?? session.avatarUrl} disabled={joining} onChange={changeAvatarFile} />
             <Button
               icon={joining ? <Loader2 className="size-5 animate-spin" /> : <Send className="size-5" />}
               onClick={join}
@@ -336,6 +440,15 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
               ) : null}
             </div>
 
+            {question.imageUrl ? (
+              <img
+                src={question.imageUrl}
+                alt=""
+                className="max-h-52 w-full rounded-2xl object-cover"
+                loading="lazy"
+              />
+            ) : null}
+
             <div className="grid gap-3">
               {question.options.map((option, index) => {
                 const selected = myAnswer?.selectedIndex === index;
@@ -355,6 +468,14 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
                       canAnswer ? "active:scale-[0.99]" : "opacity-85",
                     ].join(" ")}
                   >
+                    {question.optionImageUrls[index] ? (
+                      <img
+                        src={question.optionImageUrls[index] ?? ""}
+                        alt=""
+                        className="mb-3 max-h-32 w-full rounded-xl object-cover"
+                        loading="lazy"
+                      />
+                    ) : null}
                     <span className="mr-2 text-[#d89a22]">{String.fromCharCode(65 + index)}.</span>
                     {option}
                     {selected ? <span className="ml-2 text-sm text-[#9f1239]">選択済み</span> : null}
@@ -375,7 +496,7 @@ export function JoinRoomClient({ roomCode }: JoinRoomClientProps) {
 
         {(phase === "ranking" || phase === "finished") && myRank ? (
           <Card className="relative grid gap-3 overflow-hidden text-center">
-            <ConfettiBurst active={myRank.rank <= 3} />
+            <ConfettiBurst active={soundSettings.visualEffectsEnabled && soundSettings.guestEffectsEnabled && myRank.rank <= 3} />
             <CardTitle>あなたの順位</CardTitle>
             <p className="text-5xl font-black text-[#13294b]">{myRank.rank}位</p>
             <p className="text-xl font-black text-[#d89a22]">{myRank.score}点</p>
@@ -451,7 +572,7 @@ function StatusMessage({
       <div className="rounded-xl bg-white p-4 text-center shadow">
         <p className="text-sm font-black text-slate-500">あなたの結果</p>
         <p className="mt-1 text-2xl font-black text-[#13294b]">
-          {myAnswer.isCorrect === null ? "集計中" : myAnswer.isCorrect ? "正解" : "不正解"}
+          {myAnswer.isCorrect === null ? "集計中" : myAnswer.isCorrect ? "正解" : "惜しい！次の問題で取り返しましょう"}
         </p>
         <p className="mt-1 text-sm font-bold text-slate-600">
           {myAnswer.point === null ? "点数は正解発表後に表示されます" : `${myAnswer.point}点 / ${myAnswer.responseMs}ms`}
@@ -481,4 +602,44 @@ function StatusMessage({
   }
 
   return <p className="rounded-xl bg-slate-100 p-4 text-sm font-black text-slate-700">{phaseLabel(phase)}</p>;
+}
+
+function AvatarPicker({
+  avatarUrl,
+  disabled,
+  onChange,
+}: {
+  avatarUrl: string | null;
+  disabled: boolean;
+  onChange: (file: File | null) => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl bg-white/70 p-3">
+      <div className="grid size-14 place-items-center overflow-hidden rounded-full bg-[var(--wql-accent-soft)] text-lg font-black text-[var(--wql-accent-text)]">
+        {avatarUrl ? <img src={avatarUrl} alt="" className="size-full object-cover" /> : <Camera className="size-6" aria-hidden="true" />}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-black text-slate-500">プロフィール画像（任意）</p>
+        <p className="text-xs font-bold text-slate-500">JPEG / PNG / WebP、2MBまで</p>
+      </div>
+      <label className="inline-flex min-h-10 cursor-pointer items-center rounded-xl border border-[#d9b56d] bg-white px-3 text-sm font-black text-[var(--wql-text)]">
+        選択
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          disabled={disabled}
+          className="sr-only"
+          onChange={(event) => onChange(event.target.files?.[0] ?? null)}
+        />
+      </label>
+    </div>
+  );
+}
+
+function ParticipantAvatar({ name, avatarUrl }: { name: string; avatarUrl: string | null }) {
+  return (
+    <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--wql-accent-soft)] text-lg font-black text-[var(--wql-accent-text)]">
+      {avatarUrl ? <img src={avatarUrl} alt="" className="size-full object-cover" /> : name.slice(0, 1)}
+    </div>
+  );
 }

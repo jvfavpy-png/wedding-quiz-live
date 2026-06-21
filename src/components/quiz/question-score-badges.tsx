@@ -17,7 +17,7 @@ export function QuestionScoreBadges({
       {showDifficulty ? (
         <span
           className={[
-            "rounded-full bg-[#fff6d8] font-black text-[#6d4b00]",
+            "rounded-full bg-[var(--wql-accent-soft)] font-black text-[var(--wql-accent-text)]",
             large ? "px-4 py-2 text-2xl" : "px-3 py-1 text-xs",
           ].join(" ")}
         >
@@ -26,7 +26,7 @@ export function QuestionScoreBadges({
       ) : null}
       <span
         className={[
-          "rounded-full bg-[#13294b] font-black text-white",
+          "rounded-full bg-[var(--wql-text)] font-black text-white",
           large ? "px-4 py-2 text-2xl" : "px-3 py-1 text-xs",
         ].join(" ")}
       >

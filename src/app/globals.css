@@ -3,6 +3,26 @@
 :root {
   --background: #fff8e7;
   --foreground: #13294b;
+  --wql-bg: #fff8e7;
+  --wql-bg-soft: #fffdf5;
+  --wql-card: rgba(255, 255, 255, 0.88);
+  --wql-card-solid: #ffffff;
+  --wql-text: #13294b;
+  --wql-muted: #64748b;
+  --wql-accent: #d9b56d;
+  --wql-accent-strong: #a87917;
+  --wql-accent-soft: #fff6d8;
+  --wql-accent-text: #6d4b00;
+  --wql-success: #0f766e;
+  --wql-success-soft: #d8f7eb;
+  --wql-danger: #b42335;
+  --wql-danger-soft: #fff5f6;
+  --wql-page-gradient: linear-gradient(135deg, #fff8e7 0%, #ffffff 42%, #ffe1ea 72%, #dfe9ff 100%);
+  --wql-screen-gradient: radial-gradient(circle at top left, #fff1b8 0%, transparent 32%),
+    linear-gradient(135deg, #fff8e7 0%, #ffffff 38%, #ffe1ea 70%, #dfe9ff 100%);
+  --wql-confetti-a: #d9b56d;
+  --wql-confetti-b: #ff6f91;
+  --wql-confetti-c: #13294b;
 }
 
 @theme inline {
@@ -48,6 +68,67 @@ select {
   }
 }
 
+@keyframes screen-fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes countdown-pop {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+@keyframes screen-scene-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes answer-reveal-card {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+    box-shadow: 0 0 0 rgba(217, 181, 109, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    box-shadow: 0 24px 60px rgba(217, 181, 109, 0.22);
+  }
+}
+
+.screen-transition {
+  animation: screen-fade-in 360ms ease-out both;
+}
+
+.countdown-warning {
+  animation: countdown-pop 720ms ease-in-out infinite;
+}
+
+.screen-scene-enter {
+  animation: screen-scene-enter 420ms ease-out both;
+}
+
+.answer-reveal-card {
+  animation: answer-reveal-card 520ms ease-out both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -57,5 +138,12 @@ select {
 
   .confetti-burst {
     display: none;
+  }
+
+  .screen-transition,
+  .countdown-warning,
+  .screen-scene-enter,
+  .answer-reveal-card {
+    animation: none !important;
   }
 }

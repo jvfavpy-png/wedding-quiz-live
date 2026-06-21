@@ -42,7 +42,12 @@ export function parseParticipantSession(raw: string | null): ParticipantSession 
 
   try {
     const parsed = JSON.parse(raw) as unknown;
-    return isParticipantSession(parsed) ? parsed : null;
+    return isParticipantSession(parsed)
+      ? {
+          ...parsed,
+          avatarUrl: parsed.avatarUrl ?? null,
+        }
+      : null;
   } catch {
     return null;
   }

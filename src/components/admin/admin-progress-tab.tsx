@@ -7,11 +7,13 @@ import {
   Play,
   RefreshCw,
   RotateCcw,
+  ShieldAlert,
   Square,
   Trophy,
   Users,
 } from "lucide-react";
 import { phaseLabel } from "@/lib/utils";
+import { runModeLabel } from "@/lib/run-mode";
 import { AnswerDistributionChart } from "@/components/quiz/answer-distribution";
 import { PhaseBadge } from "@/components/quiz/phase-badge";
 import { QuestionScoreBadges } from "@/components/quiz/question-score-badges";
@@ -24,6 +26,7 @@ import type {
   AdminAction,
   AdminQuestion,
   AnswerDistribution,
+  EventRunMode,
   Phase,
   RankingEntry,
 } from "@/types/quiz";
@@ -36,6 +39,7 @@ export function AdminProgressTab({
   totalAnswerCount,
   scoredParticipantCount,
   hasRehearsalResults,
+  runMode,
   selectedQuestion,
   questions,
   effectiveSelectedQuestionId,
@@ -51,6 +55,7 @@ export function AdminProgressTab({
   canReset,
   onSelectQuestion,
   onControl,
+  onRunModeChange,
   onRefresh,
 }: {
   normalizedRoomCode: string;
@@ -60,6 +65,7 @@ export function AdminProgressTab({
   totalAnswerCount: number;
   scoredParticipantCount: number;
   hasRehearsalResults: boolean;
+  runMode: EventRunMode;
   selectedQuestion: AdminQuestion | undefined;
   questions: AdminQuestion[];
   effectiveSelectedQuestionId: string | null;
@@ -75,6 +81,7 @@ export function AdminProgressTab({
   canReset: boolean;
   onSelectQuestion: (questionId: string) => void;
   onControl: (action: AdminAction, questionId?: string) => Promise<void>;
+  onRunModeChange: (mode: EventRunMode) => Promise<void>;
   onRefresh: () => Promise<unknown>;
 }) {
   return (
@@ -90,6 +97,35 @@ export function AdminProgressTab({
               <PhaseBadge phase={phase} large />
             </div>
             <CardTitle>本番進行</CardTitle>
+            <div
+              className={[
+                "inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-black",
+                runMode === "production"
+                  ? "bg-[var(--wql-accent-soft)] text-[var(--wql-accent-text)]"
+                  : "bg-[#ffedd5] text-[#9a3412]",
+              ].join(" ")}
+            >
+              <ShieldAlert className="size-4" aria-hidden="true" />
+              現在: {runModeLabel(runMode)}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                size="sm"
+                variant={runMode === "rehearsal" ? "primary" : "secondary"}
+                disabled={busy !== null}
+                onClick={() => onRunModeChange("rehearsal")}
+              >
+                リハーサルモード
+              </Button>
+              <Button
+                size="sm"
+                variant={runMode === "production" ? "primary" : "secondary"}
+                disabled={busy !== null}
+                onClick={() => onRunModeChange("production")}
+              >
+                本番モード
+              </Button>
+            </div>
             <p className="text-sm font-bold text-slate-600">
               次の操作: <span className="text-[#13294b]">{nextOperationLabel(phase)}</span>
             </p>
@@ -212,12 +248,26 @@ export function AdminProgressTab({
                   <QuestionScoreBadges question={selectedQuestion} />
                 </div>
                 <p className="mt-2 text-2xl font-black leading-snug">{selectedQuestion.text}</p>
+                {selectedQuestion.imageUrl ? (
+                  <img
+                    src={selectedQuestion.imageUrl}
+                    alt=""
+                    className="mt-4 max-h-64 w-full rounded-2xl object-cover"
+                  />
+                ) : null}
                 <div className="mt-4 grid gap-2 sm:grid-cols-2">
                   {selectedQuestion.options.map((option, index) => (
                     <div
                       key={`${option}-${index}`}
                       className="rounded-xl bg-white/10 p-3 text-base font-bold"
                     >
+                      {selectedQuestion.optionImageUrls[index] ? (
+                        <img
+                          src={selectedQuestion.optionImageUrls[index] ?? ""}
+                          alt=""
+                          className="mb-2 max-h-28 w-full rounded-lg object-cover"
+                        />
+                      ) : null}
                       {String.fromCharCode(65 + index)}. {option}
                       {selectedQuestion.correctIndex === index ? (
                         <span className="ml-2 rounded-full bg-[#ffe7a3] px-2 py-1 text-xs font-black text-[#6d4b00]">

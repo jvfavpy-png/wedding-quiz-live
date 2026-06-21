@@ -1,5 +1,7 @@
 export type EventStatus = "waiting" | "playing" | "finished";
 
+export type EventRunMode = "rehearsal" | "production";
+
 export type Phase =
   | "lobby"
   | "question"
@@ -19,11 +21,63 @@ export type AdminAction =
 
 export type QuestionDifficulty = "easy" | "normal" | "hard" | "special" | "final";
 
+export type DesignThemeId =
+  | "classic_bridal"
+  | "garden_wedding"
+  | "quiz_show"
+  | "minimal_white"
+  | "night_party";
+
+export type SoundPackId =
+  | "elegant_wedding"
+  | "quiz_show_classic"
+  | "party_pop"
+  | "minimal_clean"
+  | "night_party"
+  | "custom";
+
+export type EffectStyleId = "minimal" | "standard" | "tv_show" | "party";
+
+export type SoundKey =
+  | "start"
+  | "countdown"
+  | "close"
+  | "reveal"
+  | "correct"
+  | "wrong"
+  | "ranking"
+  | "winner"
+  | "submit";
+
+export interface SoundSettings {
+  soundEnabled: boolean;
+  visualEffectsEnabled: boolean;
+  soundPack: SoundPackId;
+  effectStyle: EffectStyleId;
+  screenVolume: number;
+  revealDelaySeconds: number;
+  screenConfettiEnabled: boolean;
+  guestSoundEnabled: boolean;
+  guestEffectsEnabled: boolean;
+}
+
+export interface SoundAsset {
+  soundKey: SoundKey;
+  fileUrl: string;
+  fileName: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  updatedAt: string;
+}
+
 export interface PublicEvent {
   id: string;
   title: string;
   roomCode: string;
   status: EventStatus;
+  designTheme: DesignThemeId;
+  runMode: EventRunMode;
+  sound: SoundSettings;
 }
 
 export interface LiveState {
@@ -39,6 +93,8 @@ export interface PublicQuestion {
   orderNo: number;
   text: string;
   options: [string, string, string, string];
+  imageUrl: string | null;
+  optionImageUrls: [string | null, string | null, string | null, string | null];
   correctIndex: number | null;
   timeLimitSec: number;
   difficulty: QuestionDifficulty;
@@ -48,6 +104,7 @@ export interface PublicQuestion {
 
 export interface AdminQuestion extends Omit<PublicQuestion, "correctIndex"> {
   correctIndex: number;
+  presenterNote: string | null;
 }
 
 export interface RoomSnapshot {
@@ -57,6 +114,7 @@ export interface RoomSnapshot {
   participantCount: number;
   totalAnswerCount: number;
   serverNow: string;
+  soundAssets: SoundAsset[];
 }
 
 export interface AnswerDistribution {
@@ -72,6 +130,18 @@ export interface RankingEntry {
   participantId: string;
   name: string;
   score: number;
+  avatarUrl: string | null;
+}
+
+export interface AdminParticipant {
+  participantId: string;
+  name: string;
+  score: number;
+  answerCount: number;
+  joinedAt: string;
+  lastSeenAt: string;
+  avatarUrl: string | null;
+  duplicateNameCount: number;
 }
 
 export interface ParticipantSession {
@@ -79,6 +149,8 @@ export interface ParticipantSession {
   participantToken: string;
   name: string;
   score: number;
+  avatarUrl: string | null;
+  duplicateNameCount?: number;
 }
 
 export interface MyAnswer {
@@ -102,7 +174,9 @@ export interface AdminSnapshot {
   hasRehearsalResults: boolean;
   distribution: AnswerDistribution;
   ranking: RankingEntry[];
+  participants: AdminParticipant[];
   serverNow: string;
+  soundAssets: SoundAsset[];
 }
 
 export interface CreatedEvent {

@@ -5,7 +5,7 @@ import {
   normalizeQuestionDifficulty,
   validateBasePoints,
 } from "@/lib/question-settings";
-import { getSupabaseAnonServerClient } from "@/lib/supabase/server";
+import { getSupabaseAnonServerClient, getSupabaseServiceClient } from "@/lib/supabase/server";
 import type { AdminQuestion, QuestionDifficulty } from "@/types/quiz";
 
 interface QuestionPayload {
@@ -18,6 +18,9 @@ interface QuestionPayload {
   difficulty?: QuestionDifficulty;
   basePoints?: number;
   speedBonusEnabled?: boolean;
+  imageUrl?: string | null;
+  presenterNote?: string | null;
+  optionImageUrls?: [string | null, string | null, string | null, string | null];
 }
 
 interface UpsertQuestionBody {
@@ -152,9 +155,70 @@ async function upsertQuestion(request: Request): Promise<Response> {
       throw new Error(error.message);
     }
 
-    return okJson(data as unknown as AdminQuestion);
+    const saved = data as unknown as AdminQuestion;
+    const service = getSupabaseServiceClient();
+    const optionImageUrls = normalizeOptionImageUrls(question.optionImageUrls);
+    const { data: mediaRow, error: mediaError } = await service
+      .from("questions")
+      .update({
+        image_url: normalizeOptionalUrl(question.imageUrl),
+        presenter_note: normalizeOptionalText(question.presenterNote, 500),
+        option_1_image_url: normalizeOptionalUrl(optionImageUrls[0]),
+        option_2_image_url: normalizeOptionalUrl(optionImageUrls[1]),
+        option_3_image_url: normalizeOptionalUrl(optionImageUrls[2]),
+        option_4_image_url: normalizeOptionalUrl(optionImageUrls[3]),
+      })
+      .eq("event_id", event.id)
+      .eq("id", saved.id)
+      .select("image_url,presenter_note,option_1_image_url,option_2_image_url,option_3_image_url,option_4_image_url")
+      .single();
+
+    if (mediaError) {
+      throw new Error(mediaError.message);
+    }
+
+    return okJson({
+      ...saved,
+      imageUrl: mediaRow.image_url ?? null,
+      presenterNote: mediaRow.presenter_note ?? null,
+      optionImageUrls: [
+        mediaRow.option_1_image_url ?? null,
+        mediaRow.option_2_image_url ?? null,
+        mediaRow.option_3_image_url ?? null,
+        mediaRow.option_4_image_url ?? null,
+      ],
+    } satisfies AdminQuestion);
   } catch (error) {
     const status = error instanceof Error && error.message.includes("認証") ? 401 : 400;
     return errorJson(error, status);
   }
+}
+
+function normalizeOptionalText(value: string | null | undefined, maxLength: number): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.slice(0, maxLength) : null;
+}
+
+function normalizeOptionalUrl(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.startsWith("https://") || trimmed.startsWith("http://") || trimmed.startsWith("/")) {
+    return trimmed.slice(0, 1000);
+  }
+
+  throw new Error("画像URLは http(s) URL または / から始まるパスを指定してください。");
+}
+
+function normalizeOptionImageUrls(
+  value: [string | null, string | null, string | null, string | null] | undefined,
+): [string | null, string | null, string | null, string | null] {
+  return [
+    normalizeOptionalUrl(value?.[0]),
+    normalizeOptionalUrl(value?.[1]),
+    normalizeOptionalUrl(value?.[2]),
+    normalizeOptionalUrl(value?.[3]),
+  ];
 }

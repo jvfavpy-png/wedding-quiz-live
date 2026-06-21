@@ -5,7 +5,10 @@ import { KeyRound, RefreshCw } from "lucide-react";
 import { fetchJson } from "@/lib/api-client";
 import { adminPasswordPlaceholders, minAdminPasswordLength } from "@/lib/admin-password";
 import { resolveAppBaseUrl, buildPublicRoomUrls } from "@/lib/app-url";
+import { getThemeVars, normalizeDesignTheme } from "@/lib/design-themes";
+import { normalizeRunMode, runModeLabel } from "@/lib/run-mode";
 import { shouldConfirmBeforeStart } from "@/lib/rehearsal-status";
+import { defaultSoundSettings, normalizeSoundSettings } from "@/lib/sound-settings";
 import { useLiveRoom } from "@/lib/use-live-room";
 import { normalizeRoomCode, phaseLabel } from "@/lib/utils";
 import {
@@ -16,6 +19,10 @@ import {
 } from "@/components/admin/admin-tabs";
 import { AdminProgressTab } from "@/components/admin/admin-progress-tab";
 import { AdminQuestionsTab } from "@/components/admin/admin-questions-tab";
+import {
+  AdminParticipantsTab,
+  type ParticipantAdminAction,
+} from "@/components/admin/admin-participants-tab";
 import { AdminUrlsTab } from "@/components/admin/admin-urls-tab";
 import { AdminRehearsalTab } from "@/components/admin/admin-rehearsal-tab";
 import { AdminSettingsTab } from "@/components/admin/admin-settings-tab";
@@ -26,7 +33,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { ErrorMessage } from "@/components/ui/error-message";
 import { LoadingState } from "@/components/ui/loading-state";
-import type { AdminAction, AdminQuestion, AdminSnapshot } from "@/types/quiz";
+import type {
+  AdminAction,
+  AdminQuestion,
+  AdminSnapshot,
+  DesignThemeId,
+  EventRunMode,
+  SoundAsset,
+  SoundKey,
+  SoundSettings,
+} from "@/types/quiz";
 
 interface AdminRoomClientProps {
   roomCode: string;
@@ -42,6 +58,14 @@ const pretestChecklistItems = [
   "管理URLを友人に送らないことを確認した",
   "友人には参加URLだけ送る",
   "問題開始からランキング表示まで1回通した",
+  "スクリーン画面を全画面表示にした",
+  "効果音を有効化し、会場スピーカーで音量を確認した",
+  "QRコードを後方席から読み取れることを確認した",
+  "画像付き問題と選択肢画像がスマホ・スクリーンで見える",
+  "参加者名とプロフィール画像を変更できる",
+  "同姓同名の警告が出ることを確認した",
+  "本番前に回答と得点をリセットした",
+  "本番モードに切り替えた",
 ];
 
 export function AdminRoomClient({ roomCode, legacyKey = "" }: AdminRoomClientProps) {
@@ -56,6 +80,10 @@ export function AdminRoomClient({ roomCode, legacyKey = "" }: AdminRoomClientPro
   const [busy, setBusy] = useState<string | null>(null);
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
   const [eventTitle, setEventTitle] = useState("");
+  const [designTheme, setDesignTheme] = useState<DesignThemeId>("classic_bridal");
+  const [runMode, setRunMode] = useState<EventRunMode>("rehearsal");
+  const [soundSettings, setSoundSettings] = useState<SoundSettings>(defaultSoundSettings);
+  const [soundAssets, setSoundAssets] = useState<SoundAsset[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: "",
@@ -78,6 +106,7 @@ export function AdminRoomClient({ roomCode, legacyKey = "" }: AdminRoomClientPro
     questions.find((question) => question.id === effectiveSelectedQuestionId) ?? questions[0];
   const distribution = adminSnapshot?.distribution ?? live.distribution;
   const ranking = adminSnapshot?.ranking ?? live.ranking;
+  const participants = adminSnapshot?.participants ?? [];
   const participantCount = adminSnapshot?.participantCount ?? live.snapshot?.participantCount ?? 0;
   const answeredCount = distribution?.total ?? 0;
   const adminAuthorized = Boolean(adminSnapshot);
@@ -98,6 +127,10 @@ export function AdminRoomClient({ roomCode, legacyKey = "" }: AdminRoomClientPro
       );
       setAdminSnapshot(data);
       setEventTitle(data.event.title);
+      setDesignTheme(normalizeDesignTheme(data.event.designTheme));
+      setRunMode(normalizeRunMode(data.event.runMode));
+      setSoundSettings(normalizeSoundSettings(data.event.sound));
+      setSoundAssets(data.soundAssets ?? []);
       setNeedsPassword(false);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "管理画面の取得に失敗しました";
@@ -214,6 +247,8 @@ export function AdminRoomClient({ roomCode, legacyKey = "" }: AdminRoomClientPro
         body: JSON.stringify({
           roomCode: normalizedRoomCode,
           title,
+          designTheme,
+          runMode,
         }),
       });
       setNotice("イベント名を保存しました。URLとroomCodeは変わりません。");
@@ -224,6 +259,162 @@ export function AdminRoomClient({ roomCode, legacyKey = "" }: AdminRoomClientPro
       if (message.includes("認証")) {
         setNeedsPassword(true);
       }
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function changeRunMode(nextRunMode: EventRunMode) {
+    if (nextRunMode === runMode) {
+      return;
+    }
+
+    if (!adminAuthorized) {
+      setAdminError("管理者用パスワードの認証が必要です。もう一度入力してください。");
+      setNeedsPassword(true);
+      return;
+    }
+
+    if (nextRunMode === "production") {
+      const hasAnswers = (adminSnapshot?.totalAnswerCount ?? 0) > 0;
+      const hasScores = (adminSnapshot?.scoredParticipantCount ?? 0) > 0;
+      const warning = hasAnswers || hasScores
+        ? "本番モードに切り替えます。リハーサルの回答や得点が残っている可能性があります。本番前にリセット済みですか？"
+        : "本番モードに切り替えます。以後は会場進行用として扱います。よろしいですか？";
+      if (!window.confirm(warning)) {
+        return;
+      }
+    }
+
+    try {
+      setBusy("save-run-mode");
+      setAdminError(null);
+      setNotice(null);
+      await fetchJson<unknown>("/api/admin/events", {
+        method: "PATCH",
+        body: JSON.stringify({
+          roomCode: normalizedRoomCode,
+          title: eventTitle.trim() || adminSnapshot?.event.title || "Wedding Quiz Live",
+          designTheme,
+          runMode: nextRunMode,
+        }),
+      });
+      setRunMode(nextRunMode);
+      setNotice(`${runModeLabel(nextRunMode)}モードに切り替えました。`);
+      await Promise.all([live.refresh(), refreshAdmin()]);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "モード切り替えに失敗しました";
+      setAdminError(message);
+      if (message.includes("認証") || message.includes("隱崎ｨｼ")) {
+        setNeedsPassword(true);
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function saveSoundSettings() {
+    if (!adminAuthorized) {
+      setAdminError("管理者用パスワードの認証が必要です。もう一度入力してください。");
+      setNeedsPassword(true);
+      return;
+    }
+
+    try {
+      setBusy("save-sound-settings");
+      setAdminError(null);
+      setNotice(null);
+      await fetchJson<unknown>("/api/admin/events", {
+        method: "PATCH",
+        body: JSON.stringify({
+          roomCode: normalizedRoomCode,
+          title: eventTitle.trim() || adminSnapshot?.event.title || "Wedding Quiz Live",
+          designTheme,
+          runMode,
+          sound: soundSettings,
+        }),
+      });
+      setNotice("効果音・演出設定を保存しました。スクリーン画面へ反映されます。");
+      await Promise.all([live.refresh(), refreshAdmin()]);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "効果音・演出設定の保存に失敗しました";
+      setAdminError(message);
+      if (message.includes("認証")) {
+        setNeedsPassword(true);
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function uploadSound(soundKey: SoundKey, file: File) {
+    if (!adminAuthorized) {
+      setAdminError("管理者用パスワードの認証が必要です。もう一度入力してください。");
+      setNeedsPassword(true);
+      return;
+    }
+
+    try {
+      setBusy(`sound-upload-${soundKey}`);
+      setAdminError(null);
+      setNotice(null);
+      const form = new FormData();
+      form.set("roomCode", normalizedRoomCode);
+      form.set("soundKey", soundKey);
+      form.set("file", file);
+      await fetchJson<{ asset: SoundAsset }>("/api/admin/sounds", {
+        method: "POST",
+        body: form,
+      });
+      const nextSoundSettings: SoundSettings = { ...soundSettings, soundPack: "custom" };
+      await fetchJson<unknown>("/api/admin/events", {
+        method: "PATCH",
+        body: JSON.stringify({
+          roomCode: normalizedRoomCode,
+          title: eventTitle.trim() || adminSnapshot?.event.title || "Wedding Quiz Live",
+          designTheme,
+          runMode,
+          sound: nextSoundSettings,
+        }),
+      });
+      setSoundSettings(nextSoundSettings);
+      setNotice("カスタム効果音をアップロードしました。Customプリセットを使うと優先再生されます。");
+      await refreshAdmin();
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "カスタム効果音のアップロードに失敗しました";
+      setAdminError(message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function deleteSound(soundKey: SoundKey) {
+    if (!adminAuthorized) {
+      setAdminError("管理者用パスワードの認証が必要です。もう一度入力してください。");
+      setNeedsPassword(true);
+      return;
+    }
+
+    if (!window.confirm("このカスタム効果音を削除します。未設定スロットはWeb Audio標準音へ戻ります。")) {
+      return;
+    }
+
+    try {
+      setBusy(`sound-delete-${soundKey}`);
+      setAdminError(null);
+      setNotice(null);
+      await fetchJson<{ ok: true }>("/api/admin/sounds", {
+        method: "DELETE",
+        body: JSON.stringify({
+          roomCode: normalizedRoomCode,
+          soundKey,
+        }),
+      });
+      setNotice("カスタム効果音を削除しました。");
+      await refreshAdmin();
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "カスタム効果音の削除に失敗しました";
+      setAdminError(message);
     } finally {
       setBusy(null);
     }
@@ -280,6 +471,14 @@ export function AdminRoomClient({ roomCode, legacyKey = "" }: AdminRoomClientPro
       if (!window.confirm(message)) {
         return;
       }
+    }
+
+    if (
+      action === "start_question" &&
+      runMode === "rehearsal" &&
+      !window.confirm("現在はリハーサルモードです。このまま問題を開始しますか？本番前は本番モードへ切り替えてください。")
+    ) {
+      return;
     }
 
     if (
@@ -381,6 +580,25 @@ export function AdminRoomClient({ roomCode, legacyKey = "" }: AdminRoomClientPro
     }
   }
 
+  async function uploadAdminImage(file: File, kind: "question" | "option"): Promise<string> {
+    if (!adminAuthorized) {
+      setAdminError("管理者用パスワードの認証が必要です。もう一度入力してください。");
+      setNeedsPassword(true);
+      throw new Error("管理者用パスワードの認証が必要です。");
+    }
+
+    const form = new FormData();
+    form.set("roomCode", normalizedRoomCode);
+    form.set("kind", kind);
+    form.set("file", file);
+
+    const uploaded = await fetchJson<{ publicUrl: string; storagePath: string }>("/api/admin/uploads", {
+      method: "POST",
+      body: form,
+    });
+    return uploaded.publicUrl;
+  }
+
   async function deleteQuestion(questionId: string) {
     if (editingLocked) {
       setAdminError("回答受付中は問題削除できません。先に回答を締め切ってください。");
@@ -456,6 +674,41 @@ export function AdminRoomClient({ roomCode, legacyKey = "" }: AdminRoomClientPro
     }
   }
 
+  async function runParticipantAction(
+    action: ParticipantAdminAction,
+    payload: { participantId?: string; name?: string } = {},
+  ) {
+    if (!adminAuthorized) {
+      setAdminError("管理者用パスワードの認証が必要です。もう一度入力してください。");
+      setNeedsPassword(true);
+      return;
+    }
+
+    try {
+      setBusy(`participant-${action}`);
+      setAdminError(null);
+      setNotice(null);
+      await fetchJson<{ ok: true }>("/api/admin/participants", {
+        method: "POST",
+        body: JSON.stringify({
+          roomCode: normalizedRoomCode,
+          action,
+          ...payload,
+        }),
+      });
+      setNotice("参加者情報を更新しました。ランキングと回答数を再取得しています。");
+      await Promise.all([live.refresh(), refreshAdmin()]);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "参加者情報の更新に失敗しました";
+      setAdminError(message);
+      if (message.includes("認証")) {
+        setNeedsPassword(true);
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function copy(text: string) {
     await navigator.clipboard?.writeText(text);
   }
@@ -482,7 +735,7 @@ export function AdminRoomClient({ roomCode, legacyKey = "" }: AdminRoomClientPro
 
   if (live.loading && !adminSnapshot) {
     return (
-      <main className="min-h-screen bg-[#fff8e7] p-6">
+      <main className="min-h-screen bg-[var(--wql-bg)] p-6" style={getThemeVars(designTheme)}>
         <LoadingState label="管理画面を読み込み中です" />
       </main>
     );
@@ -490,7 +743,10 @@ export function AdminRoomClient({ roomCode, legacyKey = "" }: AdminRoomClientPro
 
   if (needsPassword || (!adminAuthorized && adminError)) {
     return (
-      <main className="min-h-screen bg-[linear-gradient(135deg,#fff8e7_0%,#ffffff_42%,#ffe1ea_72%,#dfe9ff_100%)] px-4 py-8 text-[#13294b]">
+      <main
+        className="min-h-screen px-4 py-8 text-[var(--wql-text)]"
+        style={{ ...getThemeVars(designTheme), background: "var(--wql-page-gradient)" }}
+      >
         <div className="mx-auto grid min-h-[calc(100vh-64px)] w-full max-w-2xl content-center gap-5">
           <Card className="grid gap-4">
             <div className="mx-auto grid size-14 place-items-center rounded-full bg-[#fff6d8] text-[#6d4b00]">
@@ -531,16 +787,22 @@ export function AdminRoomClient({ roomCode, legacyKey = "" }: AdminRoomClientPro
   }
 
   return (
-    <main className="min-h-screen bg-[linear-gradient(135deg,#fff8e7_0%,#ffffff_42%,#ffe1ea_72%,#dfe9ff_100%)] px-4 py-6 text-[#13294b]">
+    <main
+      className="min-h-screen px-4 py-6 text-[var(--wql-text)]"
+      style={{ ...getThemeVars(designTheme), background: "var(--wql-page-gradient)" }}
+    >
       <div className="mx-auto grid w-full max-w-7xl gap-5">
-        <header className="grid gap-4 rounded-3xl border border-white/70 bg-white/88 p-5 shadow-xl shadow-[#13294b]/10 backdrop-blur lg:grid-cols-[1fr_auto] lg:items-center">
+        <header className="grid gap-4 rounded-3xl border border-white/70 bg-[var(--wql-card)] p-5 shadow-xl shadow-[#13294b]/10 backdrop-blur lg:grid-cols-[1fr_auto] lg:items-center">
           <div className="min-w-0">
             <p className="text-sm font-black text-slate-500">管理画面 / roomCode {normalizedRoomCode}</p>
-            <h1 className="mt-1 break-words text-3xl font-black leading-tight text-[#13294b]">
+            <h1 className="mt-1 break-words text-3xl font-black leading-tight text-[var(--wql-text)]">
               {adminSnapshot?.event.title ?? "Wedding Quiz Live"}
             </h1>
             <p className="mt-2 text-sm font-bold text-slate-600">
               現在の状態: <span className="font-black text-[#13294b]">{phaseLabel(phase)}</span> / 接続: {live.realtimeStatus}
+            </p>
+            <p className="mt-1 text-sm font-black text-[var(--wql-accent-text)]">
+              現在: {runModeLabel(runMode)}モード
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3 lg:justify-end">
@@ -559,7 +821,7 @@ export function AdminRoomClient({ roomCode, legacyKey = "" }: AdminRoomClientPro
           </div>
         </header>
 
-        <div className="sticky top-0 z-20 -mx-4 bg-[#fff8e7]/90 px-4 py-2 backdrop-blur sm:mx-0 sm:px-0">
+        <div className="sticky top-0 z-20 -mx-4 bg-[var(--wql-bg)]/90 px-4 py-2 backdrop-blur sm:mx-0 sm:px-0">
           <AdminTabs activeTab={activeTab} onChange={changeTab} />
         </div>
 
@@ -589,6 +851,7 @@ export function AdminRoomClient({ roomCode, legacyKey = "" }: AdminRoomClientPro
             totalAnswerCount={adminSnapshot?.totalAnswerCount ?? 0}
             scoredParticipantCount={adminSnapshot?.scoredParticipantCount ?? 0}
             hasRehearsalResults={adminSnapshot?.hasRehearsalResults ?? false}
+            runMode={runMode}
             selectedQuestion={selectedQuestion}
             questions={questions}
             effectiveSelectedQuestionId={effectiveSelectedQuestionId}
@@ -604,18 +867,29 @@ export function AdminRoomClient({ roomCode, legacyKey = "" }: AdminRoomClientPro
             canReset={canReset}
             onSelectQuestion={(questionId) => setSelectedQuestionId(questionId || null)}
             onControl={runControl}
+            onRunModeChange={changeRunMode}
             onRefresh={() => Promise.all([live.refresh(), refreshAdmin()])}
           />
         ) : null}
 
         {activeTab === "questions" ? (
           <AdminQuestionsTab
+            roomCode={normalizedRoomCode}
             questions={questions}
             editingLocked={editingLocked}
             busy={busy}
             onSaveQuestion={saveQuestion}
             onDeleteQuestion={deleteQuestion}
             onMoveQuestion={moveQuestion}
+            onUploadImage={uploadAdminImage}
+          />
+        ) : null}
+
+        {activeTab === "participants" ? (
+          <AdminParticipantsTab
+            participants={participants}
+            busy={busy}
+            onAction={runParticipantAction}
           />
         ) : null}
 
@@ -641,17 +915,25 @@ export function AdminRoomClient({ roomCode, legacyKey = "" }: AdminRoomClientPro
           <AdminSettingsTab
             phase={phase}
             eventTitle={eventTitle}
+            designTheme={designTheme}
             editingLocked={editingLocked}
             adminAuthorized={adminAuthorized}
             busy={busy}
             passwordForm={passwordForm}
+            soundSettings={soundSettings}
+            soundAssets={soundAssets}
             canFinish={canFinish}
             canReopen={canReopen}
             canReset={canReset}
             onEventTitleChange={setEventTitle}
+            onDesignThemeChange={setDesignTheme}
             onSaveEventTitle={saveEventTitle}
             onPasswordFormChange={setPasswordForm}
+            onSoundSettingsChange={setSoundSettings}
             onChangeAdminPassword={changeAdminPassword}
+            onSaveSoundSettings={saveSoundSettings}
+            onUploadSound={uploadSound}
+            onDeleteSound={deleteSound}
             onControl={runControl}
           />
         ) : null}

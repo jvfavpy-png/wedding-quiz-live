@@ -3,7 +3,13 @@
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 
-const colors = ["#d9b56d", "#13294b", "#0f7b63", "#fff6d8", "#ffb3c1"];
+const colors = [
+  "var(--wql-confetti-a)",
+  "var(--wql-confetti-b)",
+  "var(--wql-confetti-c)",
+  "var(--wql-accent-soft)",
+  "var(--wql-accent)",
+];
 
 export function ConfettiBurst({
   active,

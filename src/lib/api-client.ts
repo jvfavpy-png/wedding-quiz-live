@@ -4,12 +4,15 @@ export async function fetchJson<T>(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<T> {
+  const isFormData = init?.body instanceof FormData;
   const response = await fetch(input, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
+    headers: isFormData
+      ? init?.headers
+      : {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
   });
 
   if (!response.ok) {

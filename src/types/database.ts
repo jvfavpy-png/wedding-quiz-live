@@ -18,6 +18,28 @@ export type Database = {
           admin_password_hash: string | null;
           admin_password_updated_at: string | null;
           status: "waiting" | "playing" | "finished";
+          design_theme:
+            | "classic_bridal"
+            | "garden_wedding"
+            | "quiz_show"
+            | "minimal_white"
+            | "night_party";
+          run_mode: "rehearsal" | "production";
+          sound_enabled: boolean;
+          visual_effects_enabled: boolean;
+          sound_pack:
+            | "elegant_wedding"
+            | "quiz_show_classic"
+            | "party_pop"
+            | "minimal_clean"
+            | "night_party"
+            | "custom";
+          effect_style: "minimal" | "standard" | "tv_show" | "party";
+          screen_volume: number;
+          reveal_delay_seconds: number;
+          screen_confetti_enabled: boolean;
+          guest_sound_enabled: boolean;
+          guest_effects_enabled: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -29,6 +51,28 @@ export type Database = {
           admin_password_hash?: string | null;
           admin_password_updated_at?: string | null;
           status?: "waiting" | "playing" | "finished";
+          design_theme?:
+            | "classic_bridal"
+            | "garden_wedding"
+            | "quiz_show"
+            | "minimal_white"
+            | "night_party";
+          run_mode?: "rehearsal" | "production";
+          sound_enabled?: boolean;
+          visual_effects_enabled?: boolean;
+          sound_pack?:
+            | "elegant_wedding"
+            | "quiz_show_classic"
+            | "party_pop"
+            | "minimal_clean"
+            | "night_party"
+            | "custom";
+          effect_style?: "minimal" | "standard" | "tv_show" | "party";
+          screen_volume?: number;
+          reveal_delay_seconds?: number;
+          screen_confetti_enabled?: boolean;
+          guest_sound_enabled?: boolean;
+          guest_effects_enabled?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -42,6 +86,7 @@ export type Database = {
           name: string;
           participant_token: string;
           score: number;
+          avatar_url: string | null;
           joined_at: string;
           last_seen_at: string;
         };
@@ -51,6 +96,7 @@ export type Database = {
           name: string;
           participant_token: string;
           score?: number;
+          avatar_url?: string | null;
           joined_at?: string;
           last_seen_at?: string;
         };
@@ -72,6 +118,12 @@ export type Database = {
           difficulty: "easy" | "normal" | "hard" | "special" | "final";
           base_points: number;
           speed_bonus_enabled: boolean;
+          image_url: string | null;
+          presenter_note: string | null;
+          option_1_image_url: string | null;
+          option_2_image_url: string | null;
+          option_3_image_url: string | null;
+          option_4_image_url: string | null;
           created_at: string;
         };
         Insert: {
@@ -88,6 +140,12 @@ export type Database = {
           difficulty?: "easy" | "normal" | "hard" | "special" | "final";
           base_points?: number;
           speed_bonus_enabled?: boolean;
+          image_url?: string | null;
+          presenter_note?: string | null;
+          option_1_image_url?: string | null;
+          option_2_image_url?: string | null;
+          option_3_image_url?: string | null;
+          option_4_image_url?: string | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["questions"]["Insert"]>;
@@ -179,6 +237,52 @@ export type Database = {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["question_stats"]["Insert"]>;
+        Relationships: [];
+      };
+      event_sound_assets: {
+        Row: {
+          id: string;
+          event_id: string;
+          sound_key:
+            | "start"
+            | "countdown"
+            | "close"
+            | "reveal"
+            | "correct"
+            | "wrong"
+            | "ranking"
+            | "winner"
+            | "submit";
+          file_url: string;
+          file_path: string;
+          file_name: string | null;
+          mime_type: string | null;
+          size_bytes: number | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          event_id: string;
+          sound_key:
+            | "start"
+            | "countdown"
+            | "close"
+            | "reveal"
+            | "correct"
+            | "wrong"
+            | "ranking"
+            | "winner"
+            | "submit";
+          file_url: string;
+          file_path: string;
+          file_name?: string | null;
+          mime_type?: string | null;
+          size_bytes?: number | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["event_sound_assets"]["Insert"]>;
         Relationships: [];
       };
     };
