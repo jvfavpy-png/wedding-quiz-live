@@ -9,9 +9,32 @@ create table if not exists public.events (
   admin_password_hash text null,
   admin_password_updated_at timestamptz null,
   status text not null default 'waiting',
+  design_theme text not null default 'classic_bridal',
+  run_mode text not null default 'rehearsal',
+  sound_enabled boolean not null default true,
+  visual_effects_enabled boolean not null default true,
+  sound_pack text not null default 'elegant_wedding',
+  effect_style text not null default 'standard',
+  screen_volume numeric not null default 0.55,
+  reveal_delay_seconds numeric not null default 1.2,
+  screen_confetti_enabled boolean not null default true,
+  guest_sound_enabled boolean not null default false,
+  guest_effects_enabled boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint events_status_check check (status in ('waiting', 'playing', 'finished')),
+  constraint events_run_mode_check check (run_mode in ('rehearsal', 'production')),
+  constraint events_design_theme_check check (
+    design_theme in ('classic_bridal', 'garden_wedding', 'quiz_show', 'minimal_white', 'night_party')
+  ),
+  constraint events_sound_pack_check check (
+    sound_pack in ('elegant_wedding', 'quiz_show_classic', 'party_pop', 'minimal_clean', 'night_party', 'custom')
+  ),
+  constraint events_effect_style_check check (effect_style in ('minimal', 'standard', 'tv_show', 'party')),
+  constraint events_screen_volume_check check (screen_volume >= 0 and screen_volume <= 1),
+  constraint events_reveal_delay_seconds_check check (
+    reveal_delay_seconds >= 0 and reveal_delay_seconds <= 5
+  ),
   constraint events_title_not_blank check (char_length(btrim(title)) > 0),
   constraint events_room_code_format check (room_code = upper(room_code) and char_length(room_code) between 4 and 12)
 );
@@ -22,6 +45,7 @@ create table if not exists public.participants (
   name text not null,
   participant_token text not null,
   score integer not null default 0,
+  avatar_url text null,
   joined_at timestamptz not null default now(),
   last_seen_at timestamptz not null default now(),
   constraint participants_event_token_unique unique (event_id, participant_token),
@@ -44,6 +68,12 @@ create table if not exists public.questions (
   difficulty text not null default 'normal',
   base_points integer not null default 100,
   speed_bonus_enabled boolean not null default true,
+  image_url text null,
+  presenter_note text null,
+  option_1_image_url text null,
+  option_2_image_url text null,
+  option_3_image_url text null,
+  option_4_image_url text null,
   created_at timestamptz not null default now(),
   constraint questions_event_order_unique unique (event_id, order_no) deferrable initially immediate,
   constraint questions_order_positive check (order_no > 0),
@@ -111,6 +141,22 @@ create table if not exists public.question_stats (
   )
 );
 
+create table if not exists public.event_sound_assets (
+  id uuid primary key default extensions.gen_random_uuid(),
+  event_id uuid not null references public.events(id) on delete cascade,
+  sound_key text not null,
+  file_url text not null,
+  file_path text not null,
+  file_name text null,
+  mime_type text null,
+  size_bytes integer null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint event_sound_assets_sound_key_check
+    check (sound_key in ('start', 'countdown', 'close', 'reveal', 'correct', 'wrong', 'ranking', 'winner', 'submit')),
+  constraint event_sound_assets_unique unique (event_id, sound_key)
+);
+
 alter table public.questions
   add column if not exists difficulty text not null default 'normal',
   add column if not exists base_points integer not null default 100,
@@ -118,7 +164,93 @@ alter table public.questions
 
 alter table public.events
   add column if not exists admin_password_hash text null,
-  add column if not exists admin_password_updated_at timestamptz null;
+  add column if not exists admin_password_updated_at timestamptz null,
+  add column if not exists design_theme text not null default 'classic_bridal',
+  add column if not exists run_mode text not null default 'rehearsal',
+  add column if not exists sound_enabled boolean not null default true,
+  add column if not exists visual_effects_enabled boolean not null default true,
+  add column if not exists sound_pack text not null default 'elegant_wedding',
+  add column if not exists effect_style text not null default 'standard',
+  add column if not exists screen_volume numeric not null default 0.55,
+  add column if not exists reveal_delay_seconds numeric not null default 1.2,
+  add column if not exists screen_confetti_enabled boolean not null default true,
+  add column if not exists guest_sound_enabled boolean not null default false,
+  add column if not exists guest_effects_enabled boolean not null default true;
+
+do $$
+begin
+  alter table public.events
+    add constraint events_design_theme_check
+    check (design_theme in ('classic_bridal', 'garden_wedding', 'quiz_show', 'minimal_white', 'night_party'));
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.events
+    add constraint events_run_mode_check
+    check (run_mode in ('rehearsal', 'production'));
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.events
+    add constraint events_sound_pack_check
+    check (sound_pack in ('elegant_wedding', 'quiz_show_classic', 'party_pop', 'minimal_clean', 'night_party', 'custom'));
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.events
+    add constraint events_effect_style_check
+    check (effect_style in ('minimal', 'standard', 'tv_show', 'party'));
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.events
+    add constraint events_screen_volume_check
+    check (screen_volume >= 0 and screen_volume <= 1);
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.events
+    add constraint events_reveal_delay_seconds_check
+    check (reveal_delay_seconds >= 0 and reveal_delay_seconds <= 5);
+exception
+  when duplicate_object then null;
+end $$;
+
+alter table public.questions
+  add column if not exists image_url text null,
+  add column if not exists presenter_note text null,
+  add column if not exists option_1_image_url text null,
+  add column if not exists option_2_image_url text null,
+  add column if not exists option_3_image_url text null,
+  add column if not exists option_4_image_url text null;
+
+alter table public.participants
+  add column if not exists avatar_url text null;
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values
+  ('quiz-images', 'quiz-images', true, 5242880, array['image/jpeg', 'image/png', 'image/webp']),
+  ('participant-avatars', 'participant-avatars', true, 2097152, array['image/jpeg', 'image/png', 'image/webp']),
+  ('quiz-sounds', 'quiz-sounds', true, 2097152, array['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/webm'])
+on conflict (id) do update
+set public = excluded.public,
+    file_size_limit = excluded.file_size_limit,
+    allowed_mime_types = excluded.allowed_mime_types;
 
 alter table public.answers
   add column if not exists base_points integer not null default 0,
@@ -161,6 +293,7 @@ create index if not exists questions_event_order_idx on public.questions(event_i
 create index if not exists answers_event_question_idx on public.answers(event_id, question_id);
 create index if not exists answers_participant_idx on public.answers(participant_id);
 create index if not exists question_stats_event_idx on public.question_stats(event_id);
+create index if not exists event_sound_assets_event_id_idx on public.event_sound_assets(event_id);
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -1489,6 +1622,7 @@ alter table public.answers enable row level security;
 alter table public.live_state enable row level security;
 alter table public.event_stats enable row level security;
 alter table public.question_stats enable row level security;
+alter table public.event_sound_assets enable row level security;
 
 drop policy if exists "Public can read live state" on public.live_state;
 create policy "Public can read live state"

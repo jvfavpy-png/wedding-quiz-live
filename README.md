@@ -16,6 +16,131 @@
 npm install
 ```
 
+## 追加: 効果音・演出・Custom SE運用
+
+### 効果音・演出設定
+
+管理画面の「設定」タブに「効果音・演出」セクションがあります。
+
+- 効果音ON/OFF
+- 演出ON/OFF
+- 効果音プリセット
+- 演出スタイル
+- スクリーン音量
+- 正解発表前の待ち時間
+- 正解・ランキングの祝福演出
+- ゲスト画面の効果音/演出
+- カスタム効果音のアップロード、試聴、削除
+
+スクリーン画面では、本番中に音量スライダーや演出設定を表示しません。待機中のみ「全画面表示にする」と「効果音を有効にする」を表示します。全画面を終了する場合は、Escキーを押してください。
+
+### 標準SEプリセット
+
+標準SEはWeb Audio APIで短く生成します。加えて、ユーザー提供のSEファイルを `public/sounds/provided` に同梱し、対応スロットではアップロード音源がない場合の会場用SEとして使います。
+
+- Elegant Wedding: 披露宴向けの柔らかいベル/チャイム。
+- Quiz Show Classic: 二次会向けのテンポ感。既存番組のSEは再現しません。
+- Party Pop: 明るいが高音を抑えた短いSE。
+- Minimal Clean: BGMや司会マイクを優先する控えめなSE。
+- Night Party: 夜の二次会向けの少し低めのSE。
+- Custom: 管理者がアップロードしたSEを優先。未設定スロットはユーザー提供SEまたはWeb Audio標準音へfallbackします。
+
+### 外部SE・演出素材の方針
+
+権利不明の音源、テレビ番組やゲームの効果音、YouTube等から抽出した音源は同梱しません。ユーザー提供SEは `ATTRIBUTIONS.md` と `src/lib/sound-asset-manifest.ts` に出所と利用条件を記録しています。外部SEを追加で同梱する場合も、作者、出典URL、ライセンス、商用利用、再配布、改変、クレジット要否を必ず記録してください。
+
+外部演出ライブラリも追加していません。紙吹雪と画面遷移は既存の軽量なReact/CSS実装を使い、`prefers-reduced-motion` では抑制します。
+
+### Custom SE Storage
+
+Custom SEはブラウザからStorageへ直接アップロードしません。Next.js API Route `/api/admin/sounds` が管理者認証後にservice role keyでアップロードします。service role keyはクライアントへ出しません。
+
+- bucket: `quiz-sounds`
+- public: true
+- file size limit: 2MB
+- allowed MIME types: `audio/mpeg`, `audio/wav`, `audio/ogg`, `audio/webm`
+- slot: `start`, `countdown`, `close`, `reveal`, `correct`, `wrong`, `ranking`, `winner`, `submit`
+
+### Supabaseに追加適用するSQL
+
+```sql
+alter table public.events
+  add column if not exists sound_enabled boolean not null default true,
+  add column if not exists visual_effects_enabled boolean not null default true,
+  add column if not exists sound_pack text not null default 'elegant_wedding',
+  add column if not exists effect_style text not null default 'standard',
+  add column if not exists screen_volume numeric not null default 0.55,
+  add column if not exists reveal_delay_seconds numeric not null default 1.2,
+  add column if not exists screen_confetti_enabled boolean not null default true,
+  add column if not exists guest_sound_enabled boolean not null default false,
+  add column if not exists guest_effects_enabled boolean not null default true;
+
+do $$
+begin
+  alter table public.events
+    add constraint events_sound_pack_check
+    check (sound_pack in ('elegant_wedding', 'quiz_show_classic', 'party_pop', 'minimal_clean', 'night_party', 'custom'));
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.events
+    add constraint events_effect_style_check
+    check (effect_style in ('minimal', 'standard', 'tv_show', 'party'));
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.events
+    add constraint events_screen_volume_check
+    check (screen_volume >= 0 and screen_volume <= 1);
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.events
+    add constraint events_reveal_delay_seconds_check
+    check (reveal_delay_seconds >= 0 and reveal_delay_seconds <= 5);
+exception
+  when duplicate_object then null;
+end $$;
+
+create table if not exists public.event_sound_assets (
+  id uuid primary key default extensions.gen_random_uuid(),
+  event_id uuid not null references public.events(id) on delete cascade,
+  sound_key text not null,
+  file_url text not null,
+  file_path text not null,
+  file_name text null,
+  mime_type text null,
+  size_bytes integer null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint event_sound_assets_sound_key_check
+    check (sound_key in ('start', 'countdown', 'close', 'reveal', 'correct', 'wrong', 'ranking', 'winner', 'submit')),
+  constraint event_sound_assets_unique unique (event_id, sound_key)
+);
+
+create index if not exists event_sound_assets_event_id_idx
+  on public.event_sound_assets(event_id);
+
+alter table public.event_sound_assets enable row level security;
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values
+  ('quiz-sounds', 'quiz-sounds', true, 2097152, array['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/webm'])
+on conflict (id) do update
+set public = excluded.public,
+    file_size_limit = excluded.file_size_limit,
+    allowed_mime_types = excluded.allowed_mime_types;
+```
+
 2. `.env.example` を参考に `.env.local` を作成します。
 
 ```bash
@@ -351,3 +476,123 @@ npm run build
 - 最終問題倍率
 - チーム戦
 - リハーサル用の自動回答シミュレーター
+
+## 追加: デザインテーマと効果音
+
+### デザインテーマ
+
+管理画面の「設定」タブから、イベントごとに以下の5テーマを選べます。
+
+- Classic Bridal
+- Garden Wedding
+- Quiz Show
+- Minimal White
+- Night Party
+
+選択したテーマは `events.design_theme` に保存され、管理画面・ゲスト画面・スクリーン画面に反映されます。既存イベントはmigration適用後、自動的に `classic_bridal` になります。
+
+Supabaseに追加適用するSQL:
+
+```sql
+alter table public.events
+  add column if not exists design_theme text not null default 'classic_bridal';
+
+do $$
+begin
+  alter table public.events
+    add constraint events_design_theme_check
+    check (design_theme in ('classic_bridal', 'garden_wedding', 'quiz_show', 'minimal_white', 'night_party'));
+exception
+  when duplicate_object then null;
+end $$;
+```
+
+### スクリーン効果音
+
+効果音はWeb Audio API生成音とユーザー提供SEを使います。テレビ番組・ゲーム等の権利不明SEは追加していません。
+
+- スクリーン画面で「効果音を有効にする」を押すまで音は鳴りません。
+- SFX ON/OFF、音量、演出、正解発表前の待ち時間は管理画面の「設定」タブで調整します。
+- スクリーン画面に音量スライダーや演出設定は表示しません。全画面を終了する場合は、Escキーを押してください。
+- 対象: 問題開始、残り3秒カウントダウン、締切、正解発表、ランキング、最終結果。
+- 会場リハーサルでは、プロジェクター接続後にスクリーン画面で効果音を有効化し、音量を必ず確認してください。
+- ゲスト端末から大きな音が鳴らないよう、効果音の主役はスクリーン画面に限定しています。
+
+### 参加者管理
+
+管理画面の「参加者管理」タブで、参加者名の修正、個別スコアリセット、全員スコアリセット、参加者削除ができます。参加者削除時は回答履歴も削除されるため、実行前に確認ダイアログが出ます。削除後は回答数と問題別集計を再計算します。
+
+## 追加: 本番モード・画像・インポート運用
+
+### 本番/リハーサルモード
+
+`events.run_mode` に `rehearsal` / `production` を保存します。既存イベントは `rehearsal` になります。管理画面の進行タブで現在モードを確認し、リハーサル回答や得点が残っている状態で本番モードへ切り替える場合は確認ダイアログを出します。
+
+### 問題データのバックアップ
+
+問題編集タブでJSON/CSVエクスポートとインポートができます。画像本体はCSV/JSONへbase64保存せず、`imageUrl` と `optionImageUrls` のURLだけを含めます。全置換インポートは回答履歴がある場合に失敗することがあります。本番前は先に回答と得点をリセットしてください。
+
+### 画像アップロード
+
+Supabase Storage bucket:
+
+- `quiz-images`: 問題画像、選択肢画像。public read、uploadはサーバーAPI経由。
+- `participant-avatars`: 参加者プロフィール画像。public read、uploadはサーバーAPI経由。
+
+許可形式:
+
+- image/jpeg
+- image/png
+- image/webp
+
+サイズ制限:
+
+- 問題画像: 5MB
+- 選択肢画像: 3MB
+- プロフィール画像: 2MB
+
+### Supabaseに追加適用するSQL
+
+```sql
+alter table public.events
+  add column if not exists run_mode text not null default 'rehearsal',
+  add column if not exists design_theme text not null default 'classic_bridal';
+
+do $$
+begin
+  alter table public.events
+    add constraint events_run_mode_check
+    check (run_mode in ('rehearsal', 'production'));
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.events
+    add constraint events_design_theme_check
+    check (design_theme in ('classic_bridal', 'garden_wedding', 'quiz_show', 'minimal_white', 'night_party'));
+exception
+  when duplicate_object then null;
+end $$;
+
+alter table public.questions
+  add column if not exists image_url text null,
+  add column if not exists presenter_note text null,
+  add column if not exists option_1_image_url text null,
+  add column if not exists option_2_image_url text null,
+  add column if not exists option_3_image_url text null,
+  add column if not exists option_4_image_url text null;
+
+alter table public.participants
+  add column if not exists avatar_url text null;
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values
+  ('quiz-images', 'quiz-images', true, 5242880, array['image/jpeg', 'image/png', 'image/webp']),
+  ('participant-avatars', 'participant-avatars', true, 2097152, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do update
+set public = excluded.public,
+    file_size_limit = excluded.file_size_limit,
+    allowed_mime_types = excluded.allowed_mime_types;
+```
